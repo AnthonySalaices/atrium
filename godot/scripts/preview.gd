@@ -1,65 +1,69 @@
 extends Node3D
 
-## Flat layout preview — renders the panel arrangement to a PNG and quits.
+## Flat layout preview — renders the arrangement to a PNG and quits.
 ##
-##     godot --path godot scenes/preview.tscn -- --shot out.png
+##     godot --path godot --resolution 1280x720 -- --shot out.png
 ##
-## Why this exists: the build host has no X server, so the only way to SEE a
-## layout without putting the headset on is to render it on a machine with a GPU
-## and look at the file. That makes tile placement, glow intensity and label
-## legibility iterable in seconds instead of once per headset window.
+## The build host has no X server, so this is the only way to SEE a layout without
+## putting the headset on: render it on a machine with a GPU and look at the file.
+## Roughly 90 seconds end to end, which makes spacing, colour and glow iterable.
 ##
-## ⚠️ **This is a stand-in, not a fidelity test.** `OpenXRCompositionLayer` draws
-## nothing outside an XR session, so the panels here are ordinary textured quads —
-## exactly the "blurry mesh" path the real client never uses. Judge LAYOUT,
-## COLOUR, GLOW and SPACING here. Never judge sharpness: that question was already
-## answered on hardware, and a layer beats a mesh.
+## ⚠️ **A stand-in, not a fidelity test.** `OpenXRCompositionLayer` draws nothing
+## outside an XR session, so panels here are textured quads — the very path the
+## real client avoids. Judge LAYOUT, COLOUR, GLOW, SPACING. Never sharpness.
+## ⚠️ A 104° field rendered flat also STRETCHES the frame edges, so anything near
+## a corner looks bigger and more skewed than it will on the headset.
 
+const H_FOV := 104.0            # Quest 3, horizontal
 const PANEL_DIST := 1.5
-# ⭐ 10° below eye level: the comfortable resting gaze angle from the ergonomics
-# recon. It also frees the space above the panel for the tiles.
-const PANEL_DOWN_DEG := 10.0
+const PANEL_DOWN_DEG := 10.0    # the comfortable resting gaze angle
 const DMM := 22.3
 const FONT_PX := 32
 const CELL := Vector2i(16, 40)
 const COLS := 80
 const ROWS := 28
 
-# One tile per non-focused session: name + state, never prose.
-const TILE_COLS := 20
-const TILE_ROWS := 3
-const TILE_DIST := 1.75
-const TILE_DMM := 26.0        # bigger than the terminal: read at a glance, not read
+# ── The card stack: staggered on the left, the urgent one lifts out of it.
+const STACK_YAW_DEG := -34.0
+const STACK_DIST := 1.55
+const STACK_Y := 0.06
+const CARD_W := 0.40
+const CARD_H := 0.15
+const STACK_STEP_DOWN := 0.052   # peek: enough to count them, not enough to shout
+const STACK_STEP_BACK := 0.030
+const STACK_SCALE := 0.955
+const STACK_MAX := 4             # beyond this, a "+N more" card
+const LIFT_UP := 0.20            # how far the attention card leaves the stack
+const LIFT_TOWARD := 0.22
 
-# The glass language's state colours. Glow is expressed as edge luminance.
 const STATE_COLOR := {
 	"needs-input": Color(1.0, 0.72, 0.29),
 	"error": Color(1.0, 0.45, 0.42),
 	"done": Color(0.55, 0.85, 0.62),
 	"working": Color(0.45, 0.68, 1.0),
-	"idle": Color(0.55, 0.58, 0.64),
+	"idle": Color(0.62, 0.66, 0.72),
 }
 
-# A plausible fleet, so the preview shows what a busy moment looks like.
 const FAKE := [
 	{"key": "glasshouse", "state": "needs-input", "focus": true},
-	{"key": "ferusky", "state": "working"},
-	{"key": "orca-sim", "state": "idle"},
-	{"key": "stash", "state": "done"},
-	{"key": "westworld", "state": "error"},
+	{"key": "ferusky", "state": "needs-input"},
+	{"key": "orca-sim", "state": "working"},
+	{"key": "stash", "state": "working"},
+	{"key": "westworld", "state": "idle"},
 	{"key": "vrflip", "state": "idle"},
+	{"key": "bf6-stats", "state": "idle"},
+	{"key": "aperture", "state": "idle"},
 ]
 
 var font: FontFile
+var glass_shader: Shader
 var _frames := 0
 var _shot_path := ""
 var _status_path := ""
 
 
-## ⚠️ Godot's stdout is BUFFERED, so when a windowed run hangs on Windows you see
-## nothing at all — the log stays empty until the process exits, which is exactly
-## when it never does. Writing progress to a file each step makes a stuck run
-## diagnosable from another machine. Cost one debugging round; keep it.
+## ⚠️ Godot's stdout is BUFFERED, so a hung windowed run on Windows logs nothing.
+## Per-step progress to a file makes a stuck run diagnosable from another machine.
 func note(msg: String) -> void:
 	print("[preview] " + msg)
 	if _status_path == "":
@@ -77,38 +81,31 @@ func note(msg: String) -> void:
 func _ready() -> void:
 	_shot_path = _arg_value("--shot", "preview.png")
 	_status_path = _arg_value("--status", _shot_path + ".status.txt")
-	var f := FileAccess.open(_status_path, FileAccess.WRITE)
-	if f != null:
-		f.store_line("ready: args=%s" % str(OS.get_cmdline_user_args()))
-		f.close()
-	note("shot=%s driver=%s" % [_shot_path, DisplayServer.get_name()])
+	var sf := FileAccess.open(_status_path, FileAccess.WRITE)
+	if sf != null:
+		sf.store_line("ready")
+		sf.close()
 	font = load("res://fonts/IosevkaTerm-Medium.ttf")
+	glass_shader = load("res://shaders/glass_card.gdshader")
+	note("driver=%s" % DisplayServer.get_name())
 
 	var cam := Camera3D.new()
-	cam.position = Vector3(0, 0, 0)
-	# ⚠️ Godot's `fov` is VERTICAL, and setting `keep_aspect = KEEP_WIDTH` did NOT
-	# change that here — measuring the render proved it (a panel known to be 51°
-	# wide occupied 39° worth of pixels, which only works out if the frame was
-	# 132° across). So convert explicitly instead of trusting the flag:
-	#   vertical = 2 * atan( tan(H/2) * 9/16 )  for H = 104° (Quest 3)
-	# ⭐ Measure the render rather than believing the setting.
-	cam.fov = rad_to_deg(2.0 * atan(tan(deg_to_rad(104.0) * 0.5) * 9.0 / 16.0))
+	# ⚠️ `fov` is VERTICAL, and `keep_aspect = KEEP_WIDTH` does NOT change that —
+	# measuring a render proved it. Convert explicitly rather than trusting it.
+	cam.fov = rad_to_deg(2.0 * atan(tan(deg_to_rad(H_FOV) * 0.5) * 9.0 / 16.0))
 	add_child(cam)
 
 	_build_sky()
-	note("sky built")
 	_build_focus_panel()
 	note("focus panel built")
-	_build_tiles()
-	note("tiles built")
+	_build_stack()
+	note("stack built")
 
 
 func _arg_value(flag: String, fallback: String) -> String:
 	var args := OS.get_cmdline_user_args()
 	var i := args.find(flag)
-	if i >= 0 and i + 1 < args.size():
-		return args[i + 1]
-	return fallback
+	return args[i + 1] if i >= 0 and i + 1 < args.size() else fallback
 
 
 func _build_sky() -> void:
@@ -127,22 +124,24 @@ func _build_sky() -> void:
 	add_child(we)
 
 
-## Same arithmetic as terminal.gd: dmm is the FONT size, so the panel's angular
-## width is cols * cell.x * (dmm / font_px) milliradians.
+## dmm is the FONT size, so angular width is cols * cell.x * (dmm / font_px) mrad.
 func _panel_size(cols: int, rows: int, dmm: float, dist: float) -> Vector2:
 	var vp_w := cols * CELL.x
-	var vp_h := rows * CELL.y
 	var ang := (dmm / float(FONT_PX)) * float(vp_w) / 1000.0
 	var w := 2.0 * dist * tan(ang * 0.5)
-	return Vector2(w, w * float(vp_h) / float(vp_w))
+	return Vector2(w, w * float(rows * CELL.y) / float(vp_w))
 
 
 func _build_focus_panel() -> void:
 	var size := _panel_size(COLS, ROWS + 1, DMM, PANEL_DIST)
+	var y := -PANEL_DIST * tan(deg_to_rad(PANEL_DOWN_DEG))
+	var pos := Vector3(0, y, -PANEL_DIST)
+
 	var vp := SubViewport.new()
-	# One extra cell row at the top is the STATUS STRIP. Without it the status
-	# label sits on top of the terminal's first line and hides real output.
+	# One extra cell row is the STATUS STRIP: without it the status label covers
+	# the terminal's first line, which is real output.
 	vp.size = Vector2i(COLS * CELL.x, (ROWS + 1) * CELL.y)
+	vp.transparent_bg = true
 	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	add_child(vp)
 
@@ -154,17 +153,27 @@ func _build_focus_panel() -> void:
 
 	var label := Label.new()
 	label.add_theme_font_override("font", font)
-	label.add_theme_font_size_override("font_size", 22)
+	label.add_theme_font_size_override("font_size", 24)
 	label.add_theme_color_override("font_color", STATE_COLOR["needs-input"])
-	label.position = Vector2(6, 2)
-	label.text = "glasshouse   1 waiting"
+	label.position = Vector2(8, 2)
+	label.text = "glasshouse — 1 waiting"
 	vp.add_child(label)
 
-	_quad(vp, size, Vector3(0, -PANEL_DIST * tan(deg_to_rad(PANEL_DOWN_DEG)), -PANEL_DIST))
+	# ⭐ THE HYBRID, made visible: the glass FRAME is in-scene geometry and the
+	# text sits inset inside it. In the real client that inset is a composition
+	# layer, which cannot be bezelled or blurred — so the frame has to be its own
+	# surface around it. This is the arrangement to prove on hardware.
+	var margin := 0.055
+	_glass(size + Vector2(margin, margin), pos + Vector3(0, 0, -0.012), {
+		"corner_radius_px": 34.0, "bezel_px": 4.0, "glass_opacity": 0.30,
+		"edge_strength": 0.9,
+	})
+	_glass(size, pos, {
+		"corner_radius_px": 26.0, "bezel_px": 2.0, "glass_opacity": 0.72,
+		"edge_strength": 0.25, "content": vp.get_texture(),
+	})
 
 
-## Paint the bundled sample transcript so the panel shows realistic text density
-## rather than lorem ipsum — line length is what makes a layout feel right.
 func _load_sample(grid: CellGrid) -> void:
 	var f := FileAccess.open("res://data/sample.txt", FileAccess.READ)
 	if f == null:
@@ -176,83 +185,97 @@ func _load_sample(grid: CellGrid) -> void:
 	for y in range(ROWS):
 		var text: String = str(lines[y]) if y < lines.size() else ""
 		if text.length() < COLS:
-			text = text + " ".repeat(COLS - text.length())
-		# ⚠️ A line is {y, runs}, NOT a bare array — passing the array painted
-		# nothing at all and left the panel black.
+			text += " ".repeat(COLS - text.length())
+		# ⚠️ A line is {y, runs}, not a bare array — the array painted nothing.
 		rows_out.append({"y": y, "runs": [[7, 0, 0, text.substr(0, COLS)]]})
 	grid.apply_frame({"cols": COLS, "rows": ROWS, "base": 0, "lines": rows_out})
 
 
-func _build_tiles() -> void:
-	var others: Array = FAKE.filter(func(s): return not bool(s.get("focus", false)))
-	var size := _panel_size(TILE_COLS, TILE_ROWS, TILE_DMM, TILE_DIST)
-	# ⚠️ Tiles must CLEAR the focus panel, not sit behind it. The panel is ~1.26 m
-	# tall centred on the eye line, so its top edge is ~0.63 m up; anything lower
-	# than that in the middle of the arc is simply hidden. First render had three
-	# tiles invisible behind the panel.
-	var span := deg_to_rad(64.0)
-	var n := others.size()
-	for i in range(n):
-		var t: Dictionary = others[i]
-		var frac := (float(i) / float(max(1, n - 1))) - 0.5
-		var yaw := frac * span
-		var vp := SubViewport.new()
-		vp.size = Vector2i(TILE_COLS * CELL.x, TILE_ROWS * CELL.y)
-		vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-		add_child(vp)
-		_tile_contents(vp, t)
-		var pos := Vector3(sin(yaw) * TILE_DIST, 0.52, -cos(yaw) * TILE_DIST)
-		_quad(vp, size, pos)
+## Sessions that are not focused live in a staggered stack, and the one that wants
+## you LIFTS OUT of it — the same promote-from-a-deck idea as an iOS notification
+## stack, which is a pattern people already know. Elevation is the affordance.
+func _build_stack() -> void:
+	var rest: Array = FAKE.filter(func(s): return not bool(s.get("focus", false)))
+	var lifted: Dictionary = {}
+	for s in rest:
+		if str(s.get("state", "")) == "needs-input":
+			lifted = s
+			break
+	if not lifted.is_empty():
+		rest.erase(lifted)
+
+	var yaw := deg_to_rad(STACK_YAW_DEG)
+	var base := Vector3(sin(yaw) * STACK_DIST, STACK_Y, -cos(yaw) * STACK_DIST)
+	var toward := -base.normalized()          # out of the stack, toward the eye
+
+	var shown: int = min(rest.size(), STACK_MAX)
+	# Back to front, so nearer cards overlap the ones behind them.
+	for i in range(shown - 1, -1, -1):
+		var card: Dictionary = rest[i]
+		var pos := base + Vector3(0, -STACK_STEP_DOWN * float(i), 0) - toward * (STACK_STEP_BACK * float(i))
+		var sc := pow(STACK_SCALE, float(i))
+		_card(pos, Vector2(CARD_W, CARD_H) * sc, str(card.get("key", "?")),
+				str(card.get("state", "idle")), 0.0, 0.34 - 0.04 * float(i))
+
+	var hidden: int = rest.size() - shown
+	if hidden > 0:
+		var pos := base + Vector3(0, -STACK_STEP_DOWN * float(shown) - 0.012, 0) - toward * (STACK_STEP_BACK * float(shown))
+		_card(pos, Vector2(CARD_W, CARD_H * 0.55) * pow(STACK_SCALE, float(shown)),
+				"+%d more" % hidden, "idle", 0.0, 0.22, true)
+
+	if not lifted.is_empty():
+		var pos := base + Vector3(0, LIFT_UP, 0) + toward * LIFT_TOWARD
+		_card(pos, Vector2(CARD_W, CARD_H) * 1.06, str(lifted.get("key", "?")),
+				str(lifted.get("state", "needs-input")), 1.0, 0.42)
 
 
-func _tile_contents(vp: SubViewport, t: Dictionary) -> void:
-	var state := str(t.get("state", "idle"))
+func _card(pos: Vector3, size: Vector2, title: String, state: String, glow: float,
+		opacity: float, quiet := false) -> void:
 	var tint: Color = STATE_COLOR.get(state, STATE_COLOR["idle"])
-	var waiting := state in ["needs-input", "error", "done"]
-
-	# Glass: a dark translucent plate. The GLOW is edge luminance in the state
-	# tint — not a bolted-on border — and only a session that is WAITING gets it.
-	var plate := ColorRect.new()
-	plate.size = vp.size
-	plate.color = Color(0.05, 0.065, 0.09, 0.85)
-	vp.add_child(plate)
-
-	var edge := ColorRect.new()
-	edge.size = Vector2(vp.size.x, 6)
-	edge.position = Vector2(0, vp.size.y - 6)
-	edge.color = tint if waiting else Color(tint.r, tint.g, tint.b, 0.35)
-	vp.add_child(edge)
+	var vp := SubViewport.new()
+	vp.size = Vector2i(int(size.x * 900.0), int(size.y * 900.0))
+	vp.transparent_bg = true          # the glass IS the plate; no opaque rect
+	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child(vp)
 
 	var name_label := Label.new()
 	name_label.add_theme_font_override("font", font)
-	name_label.add_theme_font_size_override("font_size", FONT_PX)
+	name_label.add_theme_font_size_override("font_size", 30 if quiet else 40)
 	name_label.add_theme_color_override("font_color",
-			Color(0.95, 0.96, 0.98) if waiting else Color(0.68, 0.70, 0.74))
-	name_label.position = Vector2(10, 4)
-	name_label.text = str(t.get("key", "?"))
+			Color(0.97, 0.98, 1.0) if glow > 0.0 else Color(0.80, 0.83, 0.88))
+	name_label.position = Vector2(26, 14)
+	name_label.text = title
 	vp.add_child(name_label)
 
-	var state_label := Label.new()
-	state_label.add_theme_font_override("font", font)
-	state_label.add_theme_font_size_override("font_size", 24)
-	state_label.add_theme_color_override("font_color", tint)
-	state_label.position = Vector2(10, 4 + FONT_PX + 6)
-	state_label.text = state
-	vp.add_child(state_label)
+	if not quiet:
+		var state_label := Label.new()
+		state_label.add_theme_font_override("font", font)
+		state_label.add_theme_font_size_override("font_size", 28)
+		state_label.add_theme_color_override("font_color", tint)
+		state_label.position = Vector2(26, 62)
+		state_label.text = state
+		vp.add_child(state_label)
+
+	_glass(size, pos, {
+		"corner_radius_px": 26.0, "bezel_px": 3.0, "glass_opacity": opacity,
+		"edge_strength": 1.0, "glow": glow, "glow_color": tint,
+		"content": vp.get_texture(),
+	})
 
 
-## ⚠️ A quad placed off-axis must be aimed at the eye in BOTH axes. Rotating
-## only around Y leaves a tile above you facing the wall behind your head, which
-## reads as a skewed keystone. `look_at` handles yaw and pitch together; the
-## extra 180° is because a QuadMesh faces +Z while look_at aims -Z.
-func _quad(vp: SubViewport, size: Vector2, pos: Vector3) -> void:
+## ⚠️ A quad placed off-axis must be aimed at the eye in BOTH axes; rotating only
+## around Y leaves a card above you facing the wall behind your head. `look_at`
+## does yaw and pitch together, and the extra 180° is because a QuadMesh faces +Z
+## while look_at aims -Z.
+func _glass(size: Vector2, pos: Vector3, params: Dictionary) -> void:
+	var mat := ShaderMaterial.new()
+	mat.shader = glass_shader
+	mat.set_shader_parameter("size_px", Vector2(size.x * 900.0, size.y * 900.0))
+	for k in params:
+		mat.set_shader_parameter(k, params[k])
+
 	var mesh := QuadMesh.new()
 	mesh.size = size
-	var mat := StandardMaterial3D.new()
-	mat.albedo_texture = vp.get_texture()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR
 	var mi := MeshInstance3D.new()
 	mi.mesh = mesh
 	mi.material_override = mat
@@ -265,21 +288,12 @@ func _quad(vp: SubViewport, size: Vector2, pos: Vector3) -> void:
 
 func _process(_d: float) -> void:
 	_frames += 1
-	# A few frames of grace: SubViewport textures and the sky are not ready on
-	# frame 1, and a screenshot taken then is simply black.
-	if _frames < 20:
+	# SubViewport textures and the sky are not ready on frame 1; a shot taken then
+	# is simply black.
+	if _frames < 24:
 		return
-	var tex := get_viewport().get_texture()
-	if tex == null:
-		note("no viewport texture — no rendering device?")
-		get_tree().quit(2)
-		return
-	var img := tex.get_image()
-	if img == null:
-		note("viewport texture has no image")
-		get_tree().quit(3)
-		return
+	var img := get_viewport().get_texture().get_image()
 	var err := img.save_png(_shot_path)
-	note("%s %s (%dx%d)" % ["saved" if err == OK else "save FAILED err=%d" % err,
-			_shot_path, img.get_width(), img.get_height()])
+	note("%s %s (%dx%d)" % ["saved" if err == OK else "FAILED", _shot_path,
+			img.get_width(), img.get_height()])
 	get_tree().quit(0 if err == OK else 1)
