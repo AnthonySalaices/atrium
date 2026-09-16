@@ -17,6 +17,12 @@ textures/vram_compression/import_etc2_astc=true
 [xr]
 
 openxr/enabled=true
+; ⛔ A failed OpenXR start otherwise pops a MODAL ALERT. On the desktop — where
+; there is no HMD by definition — that dialog hangs the process waiting for a
+; click nobody will make, or fails to appear and exits 1 in a scheduled-task
+; context. Either way a flat run of this project never renders, which cost a long
+; debugging round. The headset is unaffected: OpenXR starts fine there.
+openxr/startup_alert=false
 openxr/foveation_level=2
 ; ⚠️ godot_openxr_vendors reads THIS project setting to decide whether to inject
 ; the Meta hand-tracking manifest entries. Without it the export options are read
