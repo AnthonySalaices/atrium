@@ -12,6 +12,8 @@ signal sessions(list)
 signal config_changed(cfg)
 signal link_state(text)
 signal keys_ack(msg)
+## The host's recommendation for `jump to whoever needs me`, or "" for nobody.
+signal focus_hint(key)
 
 @export var host := "127.0.0.1"
 @export var port := 7570
@@ -56,6 +58,15 @@ func subscribe(key: String, cols := 0, rows := 0) -> void:
 		_subscribed.append(key)
 	if connected:
 		_send({"op": "subscribe", "key": key, "cols": cols, "rows": rows})
+
+
+## Stop streaming a session. ⚠️ The host restores that window's original
+## geometry when the last subscriber leaves, so always unsubscribe on a switch
+## rather than just subscribing to something else.
+func unsubscribe(key: String) -> void:
+	_subscribed.erase(key)
+	if connected:
+		_send({"op": "unsubscribe", "key": key})
 
 
 func resync(key: String) -> void:
@@ -124,6 +135,7 @@ func _process(delta: float) -> void:
 				emit_signal("screen_frame", msg)
 			"snapshot":
 				emit_signal("sessions", msg.get("sessions", []))
+				emit_signal("focus_hint", str(msg.get("focus", "")))
 			"session":
 				emit_signal("sessions", [msg.get("session", {})])
 			"config":

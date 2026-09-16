@@ -31,6 +31,12 @@ var sky_mat: ShaderMaterial
 var ambience: Ambience
 var router: InputRouter
 
+# The host sends sessions in a STABLE order (by name, never by urgency) so a
+# panel never moves because it became urgent — see glassd/focus.py. Cycling walks
+# that order locally; `focus_key` is the host's "who has waited longest" pick.
+var known: Array = []
+var focus_key := ""
+
 # ⛔ An automatic recentre below this head height is almost certainly the headset
 # sitting on the desk during an `adb install`, not somebody wearing it.
 const MIN_HEAD_Y := 0.9
@@ -63,9 +69,16 @@ func _ready() -> void:
 	client.screen_frame.connect(_on_frame)
 	client.config_changed.connect(_apply_config)
 	client.link_state.connect(func(t):
-		status.text = t
+		# Only show link state while it is not connected; once it is, the label
+		# belongs to the switcher (session name + how many are waiting).
+		if t == "connected":
+			_update_status()
+		else:
+			status.text = t
 		print("[term] link: " + t))
 	client.keys_ack.connect(_on_keys_ack)
+	client.sessions.connect(_on_sessions)
+	client.focus_hint.connect(func(k): focus_key = k)
 	client.start()
 	session = _read_data_file("session.txt", SESSION_FALLBACK)
 	client.subscribe(session, cols, rows)
@@ -312,6 +325,77 @@ func _on_keys(seq: Array) -> void:
 	client.send_keys(session, seq, _key_sent_ms)
 
 
+func _on_sessions(list: Array) -> void:
+	# A single-session delta arrives as a one-item list; merge rather than replace,
+	# or one update would wipe every other session from the switcher.
+	for item in list:
+		if typeof(item) != TYPE_DICTIONARY or not item.has("key"):
+			continue
+		var i := _index_of(str(item["key"]))
+		if i >= 0:
+			known[i] = item
+		else:
+			known.append(item)
+	known = known.filter(func(x): return str(x.get("state", "")) != "gone")
+	known.sort_custom(func(a, b): return str(a.get("key", "")) < str(b.get("key", "")))
+	_update_status()
+
+
+func _index_of(key: String) -> int:
+	for i in range(known.size()):
+		if str(known[i].get("key", "")) == key:
+			return i
+	return -1
+
+
+func waiting_count() -> int:
+	var n := 0
+	for x in known:
+		if str(x.get("state", "")) in ["needs-input", "error", "done"] or bool(x.get("unread", false)):
+			n += 1
+	return n
+
+
+func _update_status() -> void:
+	if status == null:
+		return
+	var n := waiting_count()
+	status.text = session + ("   %d waiting" % n if n > 0 else "")
+
+
+## Show a different session on the focus panel.
+func switch_to(key: String) -> void:
+	if key == "" or key == session:
+		return
+	client.unsubscribe(session)          # lets the host restore its geometry
+	session = key
+	if grid:
+		grid.clear()                     # never show the old session's text
+	client.subscribe(session, cols, rows)
+	_update_status()
+	print("[term] switched to %s" % session)
+
+
+func cycle_session(delta: int) -> void:
+	if known.is_empty():
+		return
+	var keys: Array = known.map(func(x): return str(x.get("key", "")))
+	var i := keys.find(session)
+	if i < 0:
+		switch_to(str(keys[0]))
+	else:
+		switch_to(str(keys[(i + delta + keys.size()) % keys.size()]))
+
+
+## ⭐ The one that matters: go straight to whoever has been waiting longest.
+## A glow you cannot act on is a notification with no button.
+func jump_to_glow() -> void:
+	if focus_key != "" and focus_key != session:
+		switch_to(focus_key)
+	elif focus_key == "":
+		print("[term] nobody is waiting")
+
+
 func _on_keys_ack(m: Dictionary) -> void:
 	var t := int(m.get("t", 0))
 	if t > 0:
@@ -327,8 +411,25 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	# ignored for them, but PASSED THROUGH for typing.
 	# ⚠️ Keychron V1 Max sends media keys on the F-row by default, so plain F1
 	# never arrives; ctrl+alt+R is the primary binding (and `keys.recenter`).
-	if not k.echo and ((k.ctrl_pressed and k.alt_pressed and k.keycode == KEY_R)
-			or k.keycode == KEY_F1):
+	if not k.echo and k.ctrl_pressed and k.alt_pressed:
+		# ⚠️ These are matched before the router runs, so a binding never also
+		# gets typed into the pane. They mirror `keys` in config/default.lua;
+		# ⏳ parsing those strings into keycodes is not done yet, so the defaults
+		# are hardcoded here and the config values are currently decorative.
+		match k.keycode:
+			KEY_R:
+				recenter()
+				return
+			KEY_RIGHT:
+				cycle_session(+1)
+				return
+			KEY_LEFT:
+				cycle_session(-1)
+				return
+			KEY_SPACE:
+				jump_to_glow()
+				return
+	if not k.echo and k.keycode == KEY_F1:
 		recenter()
 		return
 	if router != null:

@@ -27,6 +27,7 @@ _clients = []             # list of Client
 import screen as _screen
 import pin as _pin
 import keys as _keys
+import focus as _focus
 
 TOKEN_PATH = os.path.join(
     os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")),
@@ -188,9 +189,16 @@ def drop(key, reason="ended"):
 
 
 def snapshot():
+    """Sessions in STABLE order, plus who is waiting longest.
+
+    Order is by name and never by urgency — see glassd/focus.py for why moving a
+    panel when it becomes urgent is the wrong trade.
+    """
     with _lock:
-        return {"type": "snapshot", "proto": PROTO, "seq": _seq, "now": now(),
-                "sessions": [dict(v) for v in _sessions.values()]}
+        sessions = [dict(v) for v in _sessions.values()]
+    return {"type": "snapshot", "proto": PROTO, "seq": _seq, "now": now(),
+            "sessions": _focus.stable_order(sessions),
+            "focus": _focus.focus_candidate(sessions)}
 
 
 # ---------------------------------------------------------------- event mapping
@@ -480,6 +488,13 @@ def ws_reader(c):
                     rows = int(msg.get("rows", 0) or 0)
                     if cols > 0 and rows > 0:
                         _pin.pin(key, cols, rows)
+                    # A session you are WATCHING must appear in the switcher even
+                    # if no agent has reported state for it — otherwise the panel
+                    # you are looking at is missing from the list you cycle
+                    # through, and next/prev skips straight past it. Guarded by
+                    # has-session so a stale key cannot conjure an entry.
+                    if tmux_session_exists(key):
+                        upsert(key, source="subscribe")
                     try:
                         m = mirror_for(key)
                         full = m.full()
@@ -572,6 +587,18 @@ def classify(pane_text, cmd):
     return "idle", "prompt-scrape"
 
 
+def tmux_session_exists(name):
+    """⚠️ The `=` prefix forces an EXACT match. Without it tmux matches by
+    prefix, so `has-session -t cc` happily succeeds against a session called
+    `cc-vr` — and a reaper built on that would never reap anything."""
+    try:
+        p = subprocess.run(["tmux", "has-session", "-t", "=" + str(name)],
+                           capture_output=True, text=True, timeout=5)
+    except Exception:
+        return True          # can't tell -> never reap on a failed probe
+    return p.returncode == 0
+
+
 def poll_loop():
     while True:
         try:
@@ -592,10 +619,21 @@ def poll_loop():
                 handle_poll({"src": "tmux-poll", "key": key, "agent": agent,
                              "tmux": sess, "pane": pane, "pid": int(pid),
                              "title": title or sess, "state": st})
+            # ⛔ Reap by asking tmux whether the SESSION still exists, not by
+            # absence from `seen`. Two traps here, both of which produced real
+            # bugs:
+            #  1. `seen` only holds panes whose current command is an agent, and
+            #     that command changes to `bash`/`python3` while the agent runs a
+            #     tool — so a live session drops out of `seen` constantly.
+            #  2. Sessions created by a hook or a keystroke carry no `tmux`
+            #     field, so the old `v.get("tmux") and ...` test skipped them
+            #     entirely and they lived forever. That would have produced
+            #     phantom entries the moment hooks were enabled.
             with _lock:
-                gone = [k for k, v in _sessions.items() if v.get("tmux") and k not in seen]
-            for k in gone:
-                drop(k, "pane-gone")
+                known = list(_sessions.keys())
+            for k in known:
+                if not tmux_session_exists(k):
+                    drop(k, "session-gone")
         except Exception:
             pass
         time.sleep(POLL_S)

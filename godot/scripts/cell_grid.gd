@@ -87,6 +87,15 @@ func configure(p_cols: int, p_rows: int, p_font: FontFile, p_font_size: int, p_c
 	queue_redraw()
 
 
+## Blank every row. Used when switching sessions: the first frame of the new
+## session arrives a moment later, and showing the PREVIOUS session's text in the
+## meantime is worse than showing nothing — it reads as "the switch did nothing".
+func clear() -> void:
+	for y in range(rows):
+		grid[y] = [[DEFAULT, DEFAULT, 0, " ".repeat(cols)]]
+	queue_redraw()
+
+
 ## Apply one frame from glassd. base == 0 means a full frame.
 func apply_frame(msg: Dictionary) -> void:
 	var c: int = int(msg.get("cols", cols))
