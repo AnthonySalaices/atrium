@@ -49,6 +49,16 @@ var distance := 1.5
 
 
 func _ready() -> void:
+	# ⚠️ `--scene` is not honoured when running from a project directory (it is
+	# marked export-only), and a bare positional scene path is ignored too — both
+	# silently run THIS scene instead, which then sits retrying its connection
+	# forever and produces no preview. So the main scene dispatches: passing
+	# `--shot <path>` means "render the flat layout preview and quit".
+	if OS.get_cmdline_user_args().has("--shot"):
+		print("[term] --shot given, handing over to the preview scene")
+		get_tree().change_scene_to_file("res://scenes/preview.tscn")
+		return
+
 	font = load("res://fonts/IosevkaTerm-Medium.ttf")
 	_boot_xr()
 
