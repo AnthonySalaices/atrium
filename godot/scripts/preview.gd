@@ -16,6 +16,9 @@ extends Node3D
 ## answered on hardware, and a layer beats a mesh.
 
 const PANEL_DIST := 1.5
+# ⭐ 10° below eye level: the comfortable resting gaze angle from the ergonomics
+# recon. It also frees the space above the panel for the tiles.
+const PANEL_DOWN_DEG := 10.0
 const DMM := 22.3
 const FONT_PX := 32
 const CELL := Vector2i(16, 40)
@@ -83,12 +86,13 @@ func _ready() -> void:
 
 	var cam := Camera3D.new()
 	cam.position = Vector3(0, 0, 0)
-	# ⚠️ Godot's `fov` is VERTICAL unless you say otherwise, so setting it to the
-	# headset's horizontal figure makes everything look far too small and every
-	# judgement about size wrong. KEEP_WIDTH makes fov horizontal; 104° is the
-	# Quest 3's, so angular sizes here match what the headset shows.
-	cam.keep_aspect = Camera3D.KEEP_WIDTH
-	cam.fov = 104.0
+	# ⚠️ Godot's `fov` is VERTICAL, and setting `keep_aspect = KEEP_WIDTH` did NOT
+	# change that here — measuring the render proved it (a panel known to be 51°
+	# wide occupied 39° worth of pixels, which only works out if the frame was
+	# 132° across). So convert explicitly instead of trusting the flag:
+	#   vertical = 2 * atan( tan(H/2) * 9/16 )  for H = 104° (Quest 3)
+	# ⭐ Measure the render rather than believing the setting.
+	cam.fov = rad_to_deg(2.0 * atan(tan(deg_to_rad(104.0) * 0.5) * 9.0 / 16.0))
 	add_child(cam)
 
 	_build_sky()
@@ -156,7 +160,7 @@ func _build_focus_panel() -> void:
 	label.text = "glasshouse   1 waiting"
 	vp.add_child(label)
 
-	_quad(vp, size, Vector3(0, 0, -PANEL_DIST), 0.0)
+	_quad(vp, size, Vector3(0, -PANEL_DIST * tan(deg_to_rad(PANEL_DOWN_DEG)), -PANEL_DIST))
 
 
 ## Paint the bundled sample transcript so the panel shows realistic text density
@@ -197,8 +201,8 @@ func _build_tiles() -> void:
 		vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 		add_child(vp)
 		_tile_contents(vp, t)
-		var pos := Vector3(sin(yaw) * TILE_DIST, 0.86, -cos(yaw) * TILE_DIST)
-		_quad(vp, size, pos, -yaw)
+		var pos := Vector3(sin(yaw) * TILE_DIST, 0.52, -cos(yaw) * TILE_DIST)
+		_quad(vp, size, pos)
 
 
 func _tile_contents(vp: SubViewport, t: Dictionary) -> void:
@@ -237,7 +241,11 @@ func _tile_contents(vp: SubViewport, t: Dictionary) -> void:
 	vp.add_child(state_label)
 
 
-func _quad(vp: SubViewport, size: Vector2, pos: Vector3, yaw: float) -> void:
+## ⚠️ A quad placed off-axis must be aimed at the eye in BOTH axes. Rotating
+## only around Y leaves a tile above you facing the wall behind your head, which
+## reads as a skewed keystone. `look_at` handles yaw and pitch together; the
+## extra 180° is because a QuadMesh faces +Z while look_at aims -Z.
+func _quad(vp: SubViewport, size: Vector2, pos: Vector3) -> void:
 	var mesh := QuadMesh.new()
 	mesh.size = size
 	var mat := StandardMaterial3D.new()
@@ -249,8 +257,10 @@ func _quad(vp: SubViewport, size: Vector2, pos: Vector3, yaw: float) -> void:
 	mi.mesh = mesh
 	mi.material_override = mat
 	mi.position = pos
-	mi.rotation.y = yaw
 	add_child(mi)
+	if pos.length() > 0.001:
+		mi.look_at(Vector3.ZERO, Vector3.UP)
+		mi.rotate_object_local(Vector3.UP, PI)
 
 
 func _process(_d: float) -> void:
