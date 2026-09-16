@@ -1,0 +1,4 @@
+# The address of the machine running glassd, as the headset sees it.
+# Copy this file to host.txt and put your own address in it — host.txt is
+# gitignored, like token.txt, so nobody publishes their LAN layout by accident.
+192.168.1.50

@@ -1,0 +1,30 @@
+; Engine configuration file.
+config_version=5
+
+[application]
+
+config/name="Glasshouse"
+run/main_scene="res://scenes/terminal.tscn"
+config/icon="res://icon.png"
+config/features=PackedStringArray("4.7", "Mobile")
+
+[rendering]
+
+renderer/rendering_method="mobile"
+renderer/rendering_method.mobile="mobile"
+textures/vram_compression/import_etc2_astc=true
+
+[xr]
+
+openxr/enabled=true
+openxr/foveation_level=2
+; ⚠️ godot_openxr_vendors reads THIS project setting to decide whether to inject
+; the Meta hand-tracking manifest entries. Without it the export options are read
+; but silently produce nothing, and every run logs
+; "Property not found: 'xr/openxr/extensions/hand_tracking'".
+openxr/extensions/hand_tracking=true
+; Same gate as hand_tracking: without this the Meta passthrough manifest feature
+; is never injected and the runtime offers ONLY the opaque blend mode — which is
+; exactly what the headset reported on 2026-09-15.
+openxr/extensions/meta/passthrough=true
+shaders/enabled=true

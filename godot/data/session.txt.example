@@ -1,0 +1,3 @@
+# The tmux session name to show on the focus panel.
+# Copy to session.txt — that file is gitignored.
+main

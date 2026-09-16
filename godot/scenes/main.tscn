@@ -1,0 +1,10 @@
+[gd_scene load_steps=2 format=3 uid="uid://bxrwshello01"]
+
+[ext_resource type="Script" path="res://scripts/boot.gd" id="1_boot"]
+
+[node name="Main" type="Node3D"]
+script = ExtResource("1_boot")
+
+[node name="XROrigin3D" type="XROrigin3D" parent="."]
+
+[node name="XRCamera3D" type="XRCamera3D" parent="XROrigin3D"]

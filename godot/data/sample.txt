@@ -1,0 +1,15 @@
+● Reading the parser to see how rows are diffed before I change anything.
+  Read 2 files
+● The diff is per-row, and a scroll rewrites almost every row. That is fine on
+  a LAN — 56 changed rows of 62 is about 40 KB, well under one frame's budget.
+  ⚠️  One thing worth flagging
+  capture-pane -J joins wrapped lines, which destroys a fixed cell grid. The
+  flag you want is -N: it pads rows to the pane width and keeps trailing
+  spaces, so every row arrives exactly `cols` cells wide.
+  Switched it, and added a test that fails if -J ever comes back.
+● Tests pass: 52 of 52. The grid is stable across a resize now.
+> can you make the panel a little dimmer at night
+● Two ways to do that, and the config already has the hook for it:
+  1. backdrop.default.dim — scales the nebula and the stars together
+  2. glass.opacity — the window material only, leaves the sky alone
+  Which one did you have in mind? (1) reads as dusk, (2) as frosted glass.
