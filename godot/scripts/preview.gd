@@ -23,22 +23,22 @@ const CELL := Vector2i(16, 40)
 const COLS := 80
 const ROWS := 28
 
-# ── The card stack: staggered on the left, the urgent one lifts out of it.
-const STACK_YAW_DEG := -34.0
-const STACK_DIST := 1.55
-const STACK_Y := 0.06
-const CARD_W := 0.40
-const CARD_H := 0.15
-# ⛔ Cards that OVERLAP cannot be translucent: glass does not occlude, so a card
-# behind shows THROUGH the one in front and the names collide into mush. Caught
-# immediately in a render. So: a readable column while there is room, and only
-# the overflow collapses into a staggered deck of edges.
-const CARD_GAP := 0.028          # clear space between cards in the column
-const STACK_MAX := 4             # cards shown in full before collapsing
-const DECK_STEP := 0.016         # sliver of each collapsed card: countable, quiet
-const DECK_SHOW := 3             # at most this many slivers, then the count
-const LIFT_UP := 0.205           # clear air above the column: elevation is the affordance
-const LIFT_TOWARD := 0.22
+# ── Layout, from AS-0001. ⛔ The angles are not a preference: a centred 51° focus
+# plus a 15° card needs ~33° of centre separation BEFORE any gutter, so the old
+# focus-at-0 / rail-at-−34° had about 1° of clearance. Focus +6° / rail −30°
+# buys ~3° and moves the rail closer to forward gaze.
+const FOCUS_YAW_DEG := 6.0
+const FOCUS_ELEV_DEG := -10.0
+const RAIL_YAW_DEG := -30.0
+const RAIL_DIST := 1.55
+# 5.5° cards with 1.5° clear gaps. Slot 0 is RESERVED for whoever needs you.
+const RAIL_ELEV_DEG := [3.0, -4.0, -11.0, -18.0]
+const CARD_W_DEG := 15.0
+const CARD_H_DEG := 5.5
+# Text placement inside a card, in units of card height.
+const TEXT_INSET_H := 0.175
+const BASELINE_PRIMARY_H := -0.094     # above centre
+const BASELINE_SECONDARY_H := 0.242    # below centre
 
 const STATE_COLOR := {
 	"needs-input": Color(1.0, 0.72, 0.29),
@@ -102,8 +102,8 @@ func _ready() -> void:
 	_build_sky()
 	_build_focus_panel()
 	note("focus panel built")
-	_build_stack()
-	note("stack built")
+	_build_rail()
+	note("rail built")
 
 
 func _arg_value(flag: String, fallback: String) -> String:
@@ -136,45 +136,53 @@ func _panel_size(cols: int, rows: int, dmm: float, dist: float) -> Vector2:
 	return Vector2(w, w * float(rows * CELL.y) / float(vp_w))
 
 
+## ⛔ "The terminal looks pasted onto the scene" (AS-0001). A hairline around an
+## opaque black rectangle does not communicate a window. So: an actual glass
+## frame with padding, a title strip of its own, and the grid inset inside it.
+## ⚠️ The frame needs SIZE-AWARE tokens — the session card's .100h radius on a
+## 1.26 m panel would carve away usable terminal grid.
 func _build_focus_panel() -> void:
-	var size := _panel_size(COLS, ROWS + 1, DMM, PANEL_DIST)
-	var y := -PANEL_DIST * tan(deg_to_rad(PANEL_DOWN_DEG))
-	var pos := Vector3(0, y, -PANEL_DIST)
+	var term := _panel_size(COLS, ROWS, DMM, PANEL_DIST)
+	var pad := 0.038
+	var title_h := 0.075
+	var outer := Vector2(term.x + pad * 2.0, term.y + pad * 2.0 + title_h)
+	var centre := _polar(FOCUS_YAW_DEG, FOCUS_ELEV_DEG, PANEL_DIST)
+	# The frame grows upward around the grid to make room for its title strip.
+	var frame_centre := centre + Vector3(0, title_h * 0.5, 0)
 
+	var title_vp := SubViewport.new()
+	var oh := 460.0
+	title_vp.size = Vector2i(int(round(oh * outer.x / outer.y)), int(oh))
+	title_vp.transparent_bg = true
+	title_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child(title_vp)
+	var strip_px := title_h / outer.y * oh
+	_baseline_label(title_vp, "glasshouse", 34, Color(0.957, 0.969, 0.984),
+			pad / outer.x * title_vp.size.x + 6.0, strip_px * 0.72)
+	_baseline_label(title_vp, "1 waiting", 30, Color(1.0, 0.722, 0.290),
+			title_vp.size.x * 0.80, strip_px * 0.72)
+
+	_glass(outer, frame_centre, {
+		"radius_h": 0.025, "bezel_h": 0.0045, "falloff_h": 0.008,
+		"attention": 0.0, "content": title_vp.get_texture(),
+	})
+
+	# The grid itself, inset and in front. In the real client this is a
+	# composition layer, which is why it cannot be bezelled or blurred and has to
+	# sit inside a separate frame surface.
 	var vp := SubViewport.new()
-	# One extra cell row is the STATUS STRIP: without it the status label covers
-	# the terminal's first line, which is real output.
-	vp.size = Vector2i(COLS * CELL.x, (ROWS + 1) * CELL.y)
+	vp.size = Vector2i(COLS * CELL.x, ROWS * CELL.y)
 	vp.transparent_bg = true
 	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	add_child(vp)
-
 	var grid := CellGrid.new()
 	grid.configure(COLS, ROWS, font, FONT_PX, CELL)
-	grid.position = Vector2(0, CELL.y)
 	vp.add_child(grid)
 	_load_sample(grid)
 
-	var label := Label.new()
-	label.add_theme_font_override("font", font)
-	label.add_theme_font_size_override("font_size", 24)
-	label.add_theme_color_override("font_color", STATE_COLOR["needs-input"])
-	label.position = Vector2(8, 2)
-	label.text = "glasshouse — 1 waiting"
-	vp.add_child(label)
-
-	# ⭐ THE HYBRID, made visible: the glass FRAME is in-scene geometry and the
-	# text sits inset inside it. In the real client that inset is a composition
-	# layer, which cannot be bezelled or blurred — so the frame has to be its own
-	# surface around it. This is the arrangement to prove on hardware.
-	var margin := 0.055
-	_glass(size + Vector2(margin, margin), pos + Vector3(0, 0, -0.012), {
-		"corner_radius_px": 34.0, "bezel_px": 4.0, "glass_opacity": 0.30,
-		"edge_strength": 0.9,
-	})
-	_glass(size, pos, {
-		"corner_radius_px": 26.0, "bezel_px": 2.0, "glass_opacity": 0.72,
-		"edge_strength": 0.25, "content": vp.get_texture(),
+	_glass(term, centre + Vector3(0, 0, 0.010), {
+		"radius_h": 0.012, "bezel_h": 0.003, "falloff_h": 0.006,
+		"body_alpha": 0.94, "attention": 0.0, "content": vp.get_texture(),
 	})
 
 
@@ -195,86 +203,105 @@ func _load_sample(grid: CellGrid) -> void:
 	grid.apply_frame({"cols": COLS, "rows": ROWS, "base": 0, "lines": rows_out})
 
 
-## Sessions that are not focused live in a staggered stack, and the one that wants
-## you LIFTS OUT of it — the same promote-from-a-deck idea as an iOS notification
-## stack, which is a pattern people already know. Elevation is the affordance.
-func _build_stack() -> void:
+## Sessions that are not focused sit on a fixed rail to the left, one per slot.
+##
+## ⛔ **Slot 0 is reserved for whoever needs you, and nothing moves or grows.**
+## The previous version lifted the waiting card up, toward the viewer and 6%
+## larger, which broke the layout at exactly the moment predictability matters
+## most — and crowded the terminal's reading area. The signal lives in the
+## material instead: same slot, same size, brighter edge.
+## ⛔ No sliver deck either. A transparent sliver is a poor counting device; the
+## number was always the useful part. Four slots, then one overflow affordance.
+func _build_rail() -> void:
 	var rest: Array = FAKE.filter(func(s): return not bool(s.get("focus", false)))
-	var lifted: Dictionary = {}
+	var waiting: Dictionary = {}
 	for s in rest:
 		if str(s.get("state", "")) == "needs-input":
-			lifted = s
+			waiting = s
 			break
-	if not lifted.is_empty():
-		rest.erase(lifted)
+	if not waiting.is_empty():
+		rest.erase(waiting)
 
-	var yaw := deg_to_rad(STACK_YAW_DEG)
-	var base := Vector3(sin(yaw) * STACK_DIST, STACK_Y, -cos(yaw) * STACK_DIST)
-	var toward := -base.normalized()          # out of the stack, toward the eye
+	var slots: Array = []
+	if not waiting.is_empty():
+		slots.append({"card": waiting, "attention": 1.0})
+	for c in rest:
+		if slots.size() >= RAIL_ELEV_DEG.size():
+			break
+		slots.append({"card": c, "attention": 0.0})
 
-	var shown: int = min(rest.size(), STACK_MAX)
-	var step := CARD_H + CARD_GAP
-	var y_cursor := 0.0
-	for i in range(shown):
-		var card: Dictionary = rest[i]
-		_card(base + Vector3(0, y_cursor, 0), Vector2(CARD_W, CARD_H),
-				str(card.get("key", "?")), str(card.get("state", "idle")), 0.0, 0.42)
-		y_cursor -= step
+	var placed: int = slots.size()
+	var leftover: int = rest.size() - (placed - (0 if waiting.is_empty() else 1))
+	if leftover > 0:
+		# The last slot becomes the overflow affordance rather than a session.
+		slots[RAIL_ELEV_DEG.size() - 1] = {"overflow": leftover + 1}
 
-	# The overflow: a staggered deck. Each sliver is a real card pushed almost
-	# entirely behind the one in front, so you can COUNT the work waiting without
-	# reading any of it — and a deck of four reads differently from a deck of one.
-	var hidden: int = rest.size() - shown
-	if hidden > 0:
-		y_cursor -= 0.012
-		var slivers: int = min(hidden, DECK_SHOW)
-		for i in range(slivers - 1, -1, -1):
-			var c: Dictionary = rest[shown + i]
-			_card(base + Vector3(0, y_cursor - DECK_STEP * float(i), -0.004 * float(i)),
-					Vector2(CARD_W - 0.02 * float(i), CARD_H),
-					"", str(c.get("state", "idle")), 0.0, 0.30, true)
-		_card(base + Vector3(0, y_cursor - DECK_STEP * float(slivers) - 0.030, 0),
-				Vector2(CARD_W - 0.02 * float(slivers), 0.055),
-				"+%d more" % hidden, "idle", 0.0, 0.26, true)
-
-	if not lifted.is_empty():
-		var pos := base + Vector3(0, LIFT_UP, 0) + toward * LIFT_TOWARD
-		_card(pos, Vector2(CARD_W, CARD_H) * 1.06, str(lifted.get("key", "?")),
-				str(lifted.get("state", "needs-input")), 1.0, 0.42)
+	for i in range(slots.size()):
+		var slot: Dictionary = slots[i]
+		var pos := _polar(RAIL_YAW_DEG, float(RAIL_ELEV_DEG[i]), RAIL_DIST)
+		var size := _angular_size(CARD_W_DEG, CARD_H_DEG, RAIL_DIST)
+		if slot.has("overflow"):
+			_card(pos, size, "+%d more" % int(slot["overflow"]), "", 0.0)
+		else:
+			var c: Dictionary = slot["card"]
+			_card(pos, size, str(c.get("key", "?")), str(c.get("state", "idle")),
+					float(slot["attention"]))
 
 
-func _card(pos: Vector3, size: Vector2, title: String, state: String, glow: float,
-		opacity: float, quiet := false) -> void:
-	var tint: Color = STATE_COLOR.get(state, STATE_COLOR["idle"])
+## Angles to a position, and angular size to metres — so the layout is specified
+## the way it is actually perceived rather than in arbitrary metres.
+func _polar(yaw_deg: float, elev_deg: float, dist: float) -> Vector3:
+	var yaw := deg_to_rad(yaw_deg)
+	var elev := deg_to_rad(elev_deg)
+	return Vector3(dist * cos(elev) * sin(yaw), dist * sin(elev),
+			-dist * cos(elev) * cos(yaw))
+
+
+func _angular_size(w_deg: float, h_deg: float, dist: float) -> Vector2:
+	return Vector2(2.0 * dist * tan(deg_to_rad(w_deg) * 0.5),
+			2.0 * dist * tan(deg_to_rad(h_deg) * 0.5))
+
+
+func _card(pos: Vector3, size: Vector2, title: String, state: String,
+		attention: float) -> void:
+	# The reference card is 329x120 for aspect 2.741; 2x for a clean flat render.
+	var h_px := 240.0
 	var vp := SubViewport.new()
-	vp.size = Vector2i(int(size.x * 900.0), int(size.y * 900.0))
-	vp.transparent_bg = true          # the glass IS the plate; no opaque rect
+	vp.size = Vector2i(int(round(h_px * size.x / size.y)), int(h_px))
+	vp.transparent_bg = true          # the glass IS the plate
 	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	add_child(vp)
 
-	var name_label := Label.new()
-	name_label.add_theme_font_override("font", font)
-	name_label.add_theme_font_size_override("font_size", 30 if quiet else 40)
-	name_label.add_theme_color_override("font_color",
-			Color(0.97, 0.98, 1.0) if glow > 0.0 else Color(0.80, 0.83, 0.88))
-	name_label.position = Vector2(26, 14)
-	name_label.text = title
-	vp.add_child(name_label)
-
-	if not quiet:
-		var state_label := Label.new()
-		state_label.add_theme_font_override("font", font)
-		state_label.add_theme_font_size_override("font_size", 28)
-		state_label.add_theme_color_override("font_color", tint)
-		state_label.position = Vector2(26, 62)
-		state_label.text = state
-		vp.add_child(state_label)
+	var inset := TEXT_INSET_H * h_px
+	# ⚠️ AS-0001 gives BASELINES, but a Label is positioned by its top-left, so
+	# each one is offset up by the font ascent. Placing the label top at the
+	# baseline drops the text a whole ascent too low.
+	var primary_px := 56          # ~22.3 dmm at this card's angular height
+	var secondary_px := 48
+	_baseline_label(vp, title, primary_px, Color(0.957, 0.969, 0.984),
+			inset, h_px * 0.5 + BASELINE_PRIMARY_H * h_px)
+	if state != "":
+		# ⚠️ Deliberately NOT state-tinted. Five colours to decode is worse than a
+		# word you can read, and the strong edge treatment is reserved for the one
+		# state that actually wants you.
+		_baseline_label(vp, state, secondary_px, Color(0.882, 0.910, 0.941),
+				inset, h_px * 0.5 + BASELINE_SECONDARY_H * h_px)
 
 	_glass(size, pos, {
-		"corner_radius_px": 26.0, "bezel_px": 3.0, "glass_opacity": opacity,
-		"edge_strength": 1.0, "glow": glow, "glow_color": tint,
-		"content": vp.get_texture(),
+		"radius_h": 0.100, "bezel_h": 0.018, "falloff_h": 0.032,
+		"attention": attention, "content": vp.get_texture(),
 	})
+
+
+func _baseline_label(vp: SubViewport, text: String, size_px: int, color: Color,
+		x: float, baseline_y: float) -> void:
+	var l := Label.new()
+	l.add_theme_font_override("font", font)
+	l.add_theme_font_size_override("font_size", size_px)
+	l.add_theme_color_override("font_color", color)
+	l.position = Vector2(x, baseline_y - font.get_ascent(size_px))
+	l.text = text
+	vp.add_child(l)
 
 
 ## ⚠️ A quad placed off-axis must be aimed at the eye in BOTH axes; rotating only
@@ -284,7 +311,9 @@ func _card(pos: Vector3, size: Vector2, title: String, state: String, glow: floa
 func _glass(size: Vector2, pos: Vector3, params: Dictionary) -> void:
 	var mat := ShaderMaterial.new()
 	mat.shader = glass_shader
-	mat.set_shader_parameter("size_px", Vector2(size.x * 900.0, size.y * 900.0))
+	# ⚠️ The SDF works in card-height units, so it needs the real quad aspect or
+	# the corners stop being circular.
+	mat.set_shader_parameter("aspect", size.x / size.y)
 	for k in params:
 		mat.set_shader_parameter(k, params[k])
 
