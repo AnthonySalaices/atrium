@@ -147,8 +147,7 @@ func _build_focus_panel() -> void:
 	var title_h := 0.075
 	var outer := Vector2(term.x + pad * 2.0, term.y + pad * 2.0 + title_h)
 	var centre := _polar(FOCUS_YAW_DEG, FOCUS_ELEV_DEG, PANEL_DIST)
-	# The frame grows upward around the grid to make room for its title strip.
-	var frame_centre := centre + Vector3(0, title_h * 0.5, 0)
+	var group := _oriented_group(centre)
 
 	var title_vp := SubViewport.new()
 	var oh := 460.0
@@ -159,10 +158,15 @@ func _build_focus_panel() -> void:
 	var strip_px := title_h / outer.y * oh
 	_baseline_label(title_vp, "glasshouse", 34, Color(0.957, 0.969, 0.984),
 			pad / outer.x * title_vp.size.x + 6.0, strip_px * 0.72)
-	_baseline_label(title_vp, "1 waiting", 30, Color(1.0, 0.722, 0.290),
-			title_vp.size.x * 0.80, strip_px * 0.72)
+	# ⚠️ Measure the string; a guessed fraction of the width ran off the card.
+	var waiting_text := "1 waiting"
+	var waiting_w := font.get_string_size(waiting_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 30).x
+	_baseline_label(title_vp, waiting_text, 30, Color(1.0, 0.722, 0.290),
+			float(title_vp.size.x) - waiting_w - pad / outer.x * float(title_vp.size.x) - 6.0,
+			strip_px * 0.72)
 
-	_glass(outer, frame_centre, {
+	# The frame grows upward around the grid to make room for its title strip.
+	_glass_in(group, outer, Vector3(0, title_h * 0.5, -0.004), {
 		"radius_h": 0.025, "bezel_h": 0.0045, "falloff_h": 0.008,
 		"attention": 0.0, "content": title_vp.get_texture(),
 	})
@@ -180,7 +184,7 @@ func _build_focus_panel() -> void:
 	vp.add_child(grid)
 	_load_sample(grid)
 
-	_glass(term, centre + Vector3(0, 0, 0.010), {
+	_glass_in(group, term, Vector3(0, 0, 0.0), {
 		"radius_h": 0.012, "bezel_h": 0.003, "falloff_h": 0.006,
 		"body_alpha": 0.94, "attention": 0.0, "content": vp.get_texture(),
 	})
@@ -308,6 +312,35 @@ func _baseline_label(vp: SubViewport, text: String, size_px: int, color: Color,
 ## around Y leaves a card above you facing the wall behind your head. `look_at`
 ## does yaw and pitch together, and the extra 180° is because a QuadMesh faces +Z
 ## while look_at aims -Z.
+## ⛔ Two quads that are each aimed at the eye from slightly different positions
+## are NOT coplanar, so a frame and the panel inside it stop nesting — visibly,
+## as mismatched margins. Anything that must nest is aimed ONCE as a group and
+## then offset in that group's local space.
+func _oriented_group(pos: Vector3) -> Node3D:
+	var g := Node3D.new()
+	g.position = pos
+	add_child(g)
+	if pos.length() > 0.001:
+		g.look_at(Vector3.ZERO, Vector3.UP)
+		g.rotate_object_local(Vector3.UP, PI)
+	return g
+
+
+func _glass_in(parent: Node3D, size: Vector2, local_pos: Vector3, params: Dictionary) -> void:
+	var mat := ShaderMaterial.new()
+	mat.shader = glass_shader
+	mat.set_shader_parameter("aspect", size.x / size.y)
+	for k in params:
+		mat.set_shader_parameter(k, params[k])
+	var mesh := QuadMesh.new()
+	mesh.size = size
+	var mi := MeshInstance3D.new()
+	mi.mesh = mesh
+	mi.material_override = mat
+	mi.position = local_pos
+	parent.add_child(mi)
+
+
 func _glass(size: Vector2, pos: Vector3, params: Dictionary) -> void:
 	var mat := ShaderMaterial.new()
 	mat.shader = glass_shader
