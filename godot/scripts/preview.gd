@@ -25,7 +25,7 @@ const ROWS := 28
 # One tile per non-focused session: name + state, never prose.
 const TILE_COLS := 20
 const TILE_ROWS := 3
-const TILE_DIST := 1.9
+const TILE_DIST := 1.75
 const TILE_DMM := 26.0        # bigger than the terminal: read at a glance, not read
 
 # The glass language's state colours. Glow is expressed as edge luminance.
@@ -83,8 +83,12 @@ func _ready() -> void:
 
 	var cam := Camera3D.new()
 	cam.position = Vector3(0, 0, 0)
-	# Wide, to approximate how much of the headset's field of view this fills.
-	cam.fov = 95.0
+	# ⚠️ Godot's `fov` is VERTICAL unless you say otherwise, so setting it to the
+	# headset's horizontal figure makes everything look far too small and every
+	# judgement about size wrong. KEEP_WIDTH makes fov horizontal; 104° is the
+	# Quest 3's, so angular sizes here match what the headset shows.
+	cam.keep_aspect = Camera3D.KEEP_WIDTH
+	cam.fov = 104.0
 	add_child(cam)
 
 	_build_sky()
@@ -130,14 +134,17 @@ func _panel_size(cols: int, rows: int, dmm: float, dist: float) -> Vector2:
 
 
 func _build_focus_panel() -> void:
-	var size := _panel_size(COLS, ROWS, DMM, PANEL_DIST)
+	var size := _panel_size(COLS, ROWS + 1, DMM, PANEL_DIST)
 	var vp := SubViewport.new()
-	vp.size = Vector2i(COLS * CELL.x, ROWS * CELL.y)
+	# One extra cell row at the top is the STATUS STRIP. Without it the status
+	# label sits on top of the terminal's first line and hides real output.
+	vp.size = Vector2i(COLS * CELL.x, (ROWS + 1) * CELL.y)
 	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	add_child(vp)
 
 	var grid := CellGrid.new()
 	grid.configure(COLS, ROWS, font, FONT_PX, CELL)
+	grid.position = Vector2(0, CELL.y)
 	vp.add_child(grid)
 	_load_sample(grid)
 
@@ -145,7 +152,7 @@ func _build_focus_panel() -> void:
 	label.add_theme_font_override("font", font)
 	label.add_theme_font_size_override("font_size", 22)
 	label.add_theme_color_override("font_color", STATE_COLOR["needs-input"])
-	label.position = Vector2(4, 0)
+	label.position = Vector2(6, 2)
 	label.text = "glasshouse   1 waiting"
 	vp.add_child(label)
 
@@ -166,15 +173,20 @@ func _load_sample(grid: CellGrid) -> void:
 		var text: String = str(lines[y]) if y < lines.size() else ""
 		if text.length() < COLS:
 			text = text + " ".repeat(COLS - text.length())
-		rows_out.append([[7, 0, 0, text.substr(0, COLS)]])
+		# ⚠️ A line is {y, runs}, NOT a bare array — passing the array painted
+		# nothing at all and left the panel black.
+		rows_out.append({"y": y, "runs": [[7, 0, 0, text.substr(0, COLS)]]})
 	grid.apply_frame({"cols": COLS, "rows": ROWS, "base": 0, "lines": rows_out})
 
 
 func _build_tiles() -> void:
 	var others: Array = FAKE.filter(func(s): return not bool(s.get("focus", false)))
 	var size := _panel_size(TILE_COLS, TILE_ROWS, TILE_DMM, TILE_DIST)
-	# Spread across an arc ABOVE the terminal: glanceable without covering it.
-	var span := deg_to_rad(76.0)
+	# ⚠️ Tiles must CLEAR the focus panel, not sit behind it. The panel is ~1.26 m
+	# tall centred on the eye line, so its top edge is ~0.63 m up; anything lower
+	# than that in the middle of the arc is simply hidden. First render had three
+	# tiles invisible behind the panel.
+	var span := deg_to_rad(64.0)
 	var n := others.size()
 	for i in range(n):
 		var t: Dictionary = others[i]
@@ -185,7 +197,7 @@ func _build_tiles() -> void:
 		vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 		add_child(vp)
 		_tile_contents(vp, t)
-		var pos := Vector3(sin(yaw) * TILE_DIST, 0.62, -cos(yaw) * TILE_DIST)
+		var pos := Vector3(sin(yaw) * TILE_DIST, 0.86, -cos(yaw) * TILE_DIST)
 		_quad(vp, size, pos, -yaw)
 
 

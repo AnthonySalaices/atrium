@@ -220,7 +220,10 @@ func px_for_dmm(v: float, dist_m: float, panel_w_m: float, vp_px: int) -> int:
 func _build_panel() -> void:
 	var cell := Vector2i(16, 40)
 	var vp_w := cols * cell.x
-	var vp_h := rows * cell.y
+	# ⚠️ One extra row for the STATUS STRIP. The status label used to be drawn at
+	# (4, 0) directly over the terminal's first line, hiding real output — caught
+	# by looking at a rendered frame, which is exactly why the preview exists.
+	var vp_h := (rows + 1) * cell.y
 
 	# dmm is the FONT size, not the cell advance: 22.3 dmm <-> 32 px. So the
 	# panel's angular width is vp_w * (dmm / font_px) milliradians, and the
@@ -240,13 +243,14 @@ func _build_panel() -> void:
 
 	grid = CellGrid.new()
 	grid.configure(cols, rows, font, 32, cell)
+	grid.position = Vector2(0, cell.y)
 	viewport.add_child(grid)
 
 	status = Label.new()
 	status.add_theme_font_override("font", font)
 	status.add_theme_font_size_override("font_size", 22)
 	status.add_theme_color_override("font_color", Color(1.0, 0.72, 0.29))
-	status.position = Vector2(4, 0)
+	status.position = Vector2(6, 2)
 	viewport.add_child(status)
 
 	# ⚠️ Quad, not cylinder: the cylinder layer did not follow the rig between
