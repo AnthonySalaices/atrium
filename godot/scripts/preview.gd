@@ -150,20 +150,25 @@ func _build_focus_panel() -> void:
 	var group := _oriented_group(centre)
 
 	var title_vp := SubViewport.new()
-	var oh := 460.0
-	title_vp.size = Vector2i(int(round(oh * outer.x / outer.y)), int(oh))
+	# ⚠️ Match the GRID's pixels-per-metre. The first attempt sized this viewport
+	# independently, so the same font size was ~3x larger here than in the
+	# terminal and the glyphs were clipped straight off the top of the strip.
+	# Text size only means something relative to the surface it is drawn on.
+	var px_per_m := float(ROWS * CELL.y) / term.y
+	var oh := outer.y * px_per_m
+	title_vp.size = Vector2i(int(round(outer.x * px_per_m)), int(round(oh)))
 	title_vp.transparent_bg = true
 	title_vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	add_child(title_vp)
 	var strip_px := title_h / outer.y * oh
-	_baseline_label(title_vp, "glasshouse", 34, Color(0.957, 0.969, 0.984),
-			pad / outer.x * title_vp.size.x + 6.0, strip_px * 0.72)
+	var title_px := 40          # ~30 dmm: a touch larger than the 22.3 dmm body
+	_baseline_label(title_vp, "glasshouse", title_px, Color(0.957, 0.969, 0.984),
+			pad * px_per_m + 6.0, strip_px * 0.70)
 	# ⚠️ Measure the string; a guessed fraction of the width ran off the card.
 	var waiting_text := "1 waiting"
-	var waiting_w := font.get_string_size(waiting_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 30).x
-	_baseline_label(title_vp, waiting_text, 30, Color(1.0, 0.722, 0.290),
-			float(title_vp.size.x) - waiting_w - pad / outer.x * float(title_vp.size.x) - 6.0,
-			strip_px * 0.72)
+	var waiting_w := font.get_string_size(waiting_text, HORIZONTAL_ALIGNMENT_LEFT, -1, title_px).x
+	_baseline_label(title_vp, waiting_text, title_px, Color(1.0, 0.722, 0.290),
+			float(title_vp.size.x) - waiting_w - pad * px_per_m - 6.0, strip_px * 0.70)
 
 	# The frame grows upward around the grid to make room for its title strip.
 	_glass_in(group, outer, Vector3(0, title_h * 0.5, -0.004), {
@@ -198,8 +203,10 @@ func _load_sample(grid: CellGrid) -> void:
 	while not f.eof_reached():
 		lines.append(f.get_line())
 	var rows_out: Array = []
+	# Fill every row by cycling the sample: a half-empty panel makes the layout
+	# look better than it is, and line density is what you are judging.
 	for y in range(ROWS):
-		var text: String = str(lines[y]) if y < lines.size() else ""
+		var text: String = str(lines[y % lines.size()]) if lines.size() > 0 else ""
 		if text.length() < COLS:
 			text += " ".repeat(COLS - text.length())
 		# ⚠️ A line is {y, runs}, not a bare array — the array painted nothing.
