@@ -50,10 +50,35 @@ const FAKE := [
 var font: FontFile
 var _frames := 0
 var _shot_path := ""
+var _status_path := ""
+
+
+## ⚠️ Godot's stdout is BUFFERED, so when a windowed run hangs on Windows you see
+## nothing at all — the log stays empty until the process exits, which is exactly
+## when it never does. Writing progress to a file each step makes a stuck run
+## diagnosable from another machine. Cost one debugging round; keep it.
+func note(msg: String) -> void:
+	print("[preview] " + msg)
+	if _status_path == "":
+		return
+	var f := FileAccess.open(_status_path, FileAccess.READ_WRITE)
+	if f == null:
+		f = FileAccess.open(_status_path, FileAccess.WRITE)
+	if f == null:
+		return
+	f.seek_end()
+	f.store_line("%d  %s" % [Time.get_ticks_msec(), msg])
+	f.close()
 
 
 func _ready() -> void:
 	_shot_path = _arg_value("--shot", "preview.png")
+	_status_path = _arg_value("--status", _shot_path + ".status.txt")
+	var f := FileAccess.open(_status_path, FileAccess.WRITE)
+	if f != null:
+		f.store_line("ready: args=%s" % str(OS.get_cmdline_user_args()))
+		f.close()
+	note("shot=%s driver=%s" % [_shot_path, DisplayServer.get_name()])
 	font = load("res://fonts/IosevkaTerm-Medium.ttf")
 
 	var cam := Camera3D.new()
@@ -63,8 +88,11 @@ func _ready() -> void:
 	add_child(cam)
 
 	_build_sky()
+	note("sky built")
 	_build_focus_panel()
+	note("focus panel built")
 	_build_tiles()
+	note("tiles built")
 
 
 func _arg_value(flag: String, fallback: String) -> String:
@@ -219,8 +247,17 @@ func _process(_d: float) -> void:
 	# frame 1, and a screenshot taken then is simply black.
 	if _frames < 20:
 		return
-	var img := get_viewport().get_texture().get_image()
+	var tex := get_viewport().get_texture()
+	if tex == null:
+		note("no viewport texture — no rendering device?")
+		get_tree().quit(2)
+		return
+	var img := tex.get_image()
+	if img == null:
+		note("viewport texture has no image")
+		get_tree().quit(3)
+		return
 	var err := img.save_png(_shot_path)
-	print("[preview] %s -> %s (%dx%d)" % [
-			"saved" if err == OK else "FAILED", _shot_path, img.get_width(), img.get_height()])
+	note("%s %s (%dx%d)" % ["saved" if err == OK else "save FAILED err=%d" % err,
+			_shot_path, img.get_width(), img.get_height()])
 	get_tree().quit(0 if err == OK else 1)
