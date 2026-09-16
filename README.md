@@ -93,6 +93,26 @@ python3 -m unittest discover -s tests     # 52 tests
 python3 tools/keys-smoke.py               # typing, end to end, no headset
 ```
 
+## Hooks — what makes the glow exact
+
+Without hooks, the daemon guesses at agent state by scraping the pane for prompt text. With
+them, "this agent is waiting for you" is a fact the agent reports.
+
+```bash
+tools/install-hooks.py --dry-run     # show what would change
+tools/install-hooks.py               # merge, after backing the file up
+tools/install-hooks.py --uninstall   # remove only these entries
+```
+
+It edits `~/.claude/settings.json`, which every running session reads, so it backs the file up
+first, merges rather than rewrites, re-parses the result before replacing the original, and is a
+no-op when re-run. Open `/hooks` once afterwards (that re-reads the config) or start a new
+session.
+
+⛔ `PreToolUse` and `PostToolUse` are deliberately **not** hooked: they fire on every tool call
+for a signal the poller already covers, and `PreToolUse` stdout is a *permission decision* — the
+one place a buggy hook could allow or deny tool calls.
+
 ## Configuration
 
 WezTerm's model: an opinionated baseline you override only where you disagree, reloaded on save.
