@@ -29,11 +29,15 @@ const STACK_DIST := 1.55
 const STACK_Y := 0.06
 const CARD_W := 0.40
 const CARD_H := 0.15
-const STACK_STEP_DOWN := 0.052   # peek: enough to count them, not enough to shout
-const STACK_STEP_BACK := 0.030
-const STACK_SCALE := 0.955
-const STACK_MAX := 4             # beyond this, a "+N more" card
-const LIFT_UP := 0.20            # how far the attention card leaves the stack
+# ⛔ Cards that OVERLAP cannot be translucent: glass does not occlude, so a card
+# behind shows THROUGH the one in front and the names collide into mush. Caught
+# immediately in a render. So: a readable column while there is room, and only
+# the overflow collapses into a staggered deck of edges.
+const CARD_GAP := 0.028          # clear space between cards in the column
+const STACK_MAX := 4             # cards shown in full before collapsing
+const DECK_STEP := 0.016         # sliver of each collapsed card: countable, quiet
+const DECK_SHOW := 3             # at most this many slivers, then the count
+const LIFT_UP := 0.205           # clear air above the column: elevation is the affordance
 const LIFT_TOWARD := 0.22
 
 const STATE_COLOR := {
@@ -209,19 +213,29 @@ func _build_stack() -> void:
 	var toward := -base.normalized()          # out of the stack, toward the eye
 
 	var shown: int = min(rest.size(), STACK_MAX)
-	# Back to front, so nearer cards overlap the ones behind them.
-	for i in range(shown - 1, -1, -1):
+	var step := CARD_H + CARD_GAP
+	var y_cursor := 0.0
+	for i in range(shown):
 		var card: Dictionary = rest[i]
-		var pos := base + Vector3(0, -STACK_STEP_DOWN * float(i), 0) - toward * (STACK_STEP_BACK * float(i))
-		var sc := pow(STACK_SCALE, float(i))
-		_card(pos, Vector2(CARD_W, CARD_H) * sc, str(card.get("key", "?")),
-				str(card.get("state", "idle")), 0.0, 0.34 - 0.04 * float(i))
+		_card(base + Vector3(0, y_cursor, 0), Vector2(CARD_W, CARD_H),
+				str(card.get("key", "?")), str(card.get("state", "idle")), 0.0, 0.42)
+		y_cursor -= step
 
+	# The overflow: a staggered deck. Each sliver is a real card pushed almost
+	# entirely behind the one in front, so you can COUNT the work waiting without
+	# reading any of it — and a deck of four reads differently from a deck of one.
 	var hidden: int = rest.size() - shown
 	if hidden > 0:
-		var pos := base + Vector3(0, -STACK_STEP_DOWN * float(shown) - 0.012, 0) - toward * (STACK_STEP_BACK * float(shown))
-		_card(pos, Vector2(CARD_W, CARD_H * 0.55) * pow(STACK_SCALE, float(shown)),
-				"+%d more" % hidden, "idle", 0.0, 0.22, true)
+		y_cursor -= 0.012
+		var slivers: int = min(hidden, DECK_SHOW)
+		for i in range(slivers - 1, -1, -1):
+			var c: Dictionary = rest[shown + i]
+			_card(base + Vector3(0, y_cursor - DECK_STEP * float(i), -0.004 * float(i)),
+					Vector2(CARD_W - 0.02 * float(i), CARD_H),
+					"", str(c.get("state", "idle")), 0.0, 0.30, true)
+		_card(base + Vector3(0, y_cursor - DECK_STEP * float(slivers) - 0.030, 0),
+				Vector2(CARD_W - 0.02 * float(slivers), 0.055),
+				"+%d more" % hidden, "idle", 0.0, 0.26, true)
 
 	if not lifted.is_empty():
 		var pos := base + Vector3(0, LIFT_UP, 0) + toward * LIFT_TOWARD
