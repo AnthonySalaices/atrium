@@ -55,8 +55,10 @@ the figure derived from the PPD. Treat 22.3 as settled and 18 as a floor rather 
 font pixel size makes every panel exactly 2× too large, and the result looks plausible enough
 that you will not notice until you measure it.
 
-This is why the model is two-tier: **one** readable focus panel, plus up to seven glanceable
-tiles carrying a name, a state colour and a glow. Tiles are not for reading prose.
+This is why the model is two-tier: **one** readable focus panel, plus a small rail of glanceable
+cards carrying a name and a state. Cards are not for reading prose — and the rail is short on
+purpose (four slots, then a single "+N more"), because the angular budget runs out long before
+the list does.
 
 ## Wire protocol
 
@@ -90,14 +92,17 @@ Two safety properties, both deliberate:
 
 - A client may only type into a session it has **subscribed** to. Otherwise one authorised client
   could type into every agent on the host, including ones it cannot see.
+- Sessions arrive in a **stable order** (by name), separate from the host's **focus** hint (who
+  has waited longest). Order is for finding things from memory; focus is for one keypress. A list
+  that resorts itself by urgency destroys the first to serve the second.
 - Names are validated against a **whitelist** on the host, and every call is argv — never a shell
   string.
 
 ## The card material
 
 Everything is specified in units of **card height**, so one set of numbers covers every card size
-and the corner radius stays circular on any aspect. The values come from a look-dev study
-(`inbox/AS-0001/NOTES.md` in the repo history) rather than taste:
+and the corner radius stays circular on any aspect. The values come from a look-dev study that
+rendered six variants against both a dark sky and a bright room, rather than from taste:
 
 | | |
 |---|---:|
