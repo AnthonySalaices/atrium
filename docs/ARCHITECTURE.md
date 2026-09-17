@@ -139,6 +139,17 @@ Two safety properties, both deliberate:
 - Names are validated against a **whitelist** on the host, and every call is argv — never a shell
   string.
 
+### The one file route
+
+`GET /backdrop.glb` hands back whatever `backdrop.custom.glb` names, behind the same token as
+everything else, with an `ETag` of mtime and size so the headset re-downloads a room only when it
+actually changed. ⛔ **The path comes from the config, never from the URL** — the request carries
+no name to traverse with, and a daemon that already streams every agent's terminal is a bad place
+to grow a general file server. `glasshouse pack` copies the `.glb` into the config directory
+rather than referencing it where it sits, so tidying a Downloads folder cannot empty the room
+mid-session. Only self-contained `.glb` is accepted: a `.gltf` with sidecar textures would need a
+base path, which is exactly the ambiguity this route refuses to have.
+
 ## The card material
 
 Everything is specified in units of **card height**, so one set of numbers covers every card size

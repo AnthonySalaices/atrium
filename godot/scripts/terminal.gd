@@ -152,6 +152,10 @@ func _link(h: String, p: int, t: String) -> void:
 	client.host = h
 	client.port = p
 	client.token = t
+	# A custom backdrop comes from the same daemon over plain HTTP, so it needs
+	# the same three things the socket does.
+	if backdrop:
+		backdrop.set_source(h, p, t)
 	if not linked:
 		client.start()
 		linked = true

@@ -553,6 +553,121 @@ def cmd_pin(a):
     return 0
 
 
+PRESETS = {
+    "cafe": "the shipped coffee shop, baked lighting and slow loops",
+    "nebula": "the procedural sky that shipped first",
+    "void": "flat dark, nothing to look at",
+    "passthrough": "your real room, through the headset's cameras",
+}
+
+
+def _backdrop_dir():
+    return os.path.join(CONFIG_DIR, "backdrops")
+
+
+def _read_config_text():
+    ensure_config()
+    with open(USER_CONFIG) as f:
+        return f.read()
+
+
+def _write_config_text(text):
+    """Write the config back, keeping a single .bak of what was there before.
+
+    ⚠️ This is the user's hand-edited file. One backup, overwritten each time,
+    is the difference between "undo my mistake" and "clean up 40 .bak files".
+    """
+    import shutil
+    if os.path.exists(USER_CONFIG):
+        shutil.copy(USER_CONFIG, USER_CONFIG + ".bak")
+    with open(USER_CONFIG, "w") as f:
+        f.write(text)
+
+
+def _current_backdrop():
+    """(mode, preset) as the daemon would resolve them, or (None, None)."""
+    try:
+        import config as _config
+        cfg, _ = _config.evaluate(USER_CONFIG if os.path.exists(USER_CONFIG) else "")
+        _config.validate(cfg)
+        bd = cfg.get("backdrop") or {}
+        return str(bd.get("mode", "")), str((bd.get("default") or {}).get("preset", ""))
+    except Exception:
+        return None, None
+
+
+def cmd_preset(a):
+    """Pick what is behind the windows, without opening an editor."""
+    import confedit
+    mode, preset = _current_backdrop()
+    if a.action == "list":
+        live = preset if mode == "default" else mode
+        for name, what in PRESETS.items():
+            print("%s %-12s %s" % ("*" if name == live else " ", name, what))
+        if mode == "custom":
+            print("* %-12s %s" % ("custom", "your own .glb — see `glasshouse pack`"))
+        print("\nin use: %s   (%s)" % (live or "?", USER_CONFIG))
+        return 0
+
+    name = a.name
+    if name not in PRESETS:
+        print("unknown preset %r — try: %s" % (name, ", ".join(PRESETS)), file=sys.stderr)
+        return 2
+    text = _read_config_text()
+    try:
+        if name == "passthrough":
+            text = confedit.set_backdrop(text, "passthrough")
+        else:
+            text = confedit.set_backdrop(text, "default", preset=name)
+    except ValueError as e:
+        print("could not edit %s: %s" % (USER_CONFIG, e), file=sys.stderr)
+        return 1
+    _write_config_text(text)
+    print("%s: backdrop -> %s" % (USER_CONFIG, name))
+    print("   the headset restyles live on save; no rebuild, no reinstall")
+    return 0
+
+
+def cmd_pack(a):
+    """Put a .glb where the daemon can serve it, and point the config at it.
+
+    ⛔ The file is COPIED into the config directory rather than referenced where
+    it sits. A backdrop that disappears when you tidy your Downloads folder is a
+    room that vanishes mid-session, and the daemon would be serving a path it
+    does not own.
+    """
+    import confedit
+    src = os.path.expanduser(a.glb)
+    if not os.path.isfile(src):
+        print("no such file: %s" % src, file=sys.stderr)
+        return 2
+    if not src.lower().endswith(".glb"):
+        print("backdrops must be .glb (self-contained glTF) — %s is not" % src,
+              file=sys.stderr)
+        print("   a .gltf with sidecar textures needs its whole folder; export as .glb",
+              file=sys.stderr)
+        return 2
+    name = a.name or os.path.splitext(os.path.basename(src))[0]
+    dest_dir = _backdrop_dir()
+    os.makedirs(dest_dir, exist_ok=True)
+    dest = os.path.join(dest_dir, name + ".glb")
+    import shutil
+    shutil.copy(src, dest)
+    size = os.path.getsize(dest) / 1048576.0
+    text = confedit.set_backdrop(_read_config_text(), "custom", glb=dest)
+    _write_config_text(text)
+    print("packed %s (%.1f MB) -> %s" % (os.path.basename(src), size, dest))
+    print("%s: backdrop -> custom" % USER_CONFIG)
+    if size > 40:
+        print("\n⚠\ufe0f  %.0f MB goes over the headset's Wi-Fi once, then it is cached on the"
+              % size)
+        print("   device. The first load after a change will take a moment.")
+    print("\nThe room needs a clear cylinder ~2 m across in front of you: composition")
+    print("layers do not depth-sort, so anything between your eyes and a panel cuts")
+    print("through it. Unlit or baked materials only — the headset has no light budget.")
+    return 0
+
+
 def cmd_doctor(a):
     print("harnesses on $PATH:")
     found = agents.installed()
@@ -620,6 +735,16 @@ def main(argv=None):
                          "on = allow again; status = every session's geometry")
     pn.add_argument("session", nargs="?", help="tmux session (default: the one you are in)")
     pn.set_defaults(fn=cmd_pin)
+
+    pr = sub.add_parser("preset", help="pick what is behind the windows")
+    pr.add_argument("action", choices=("list", "use"))
+    pr.add_argument("name", nargs="?", help="cafe | nebula | void | passthrough")
+    pr.set_defaults(fn=cmd_preset)
+
+    pk = sub.add_parser("pack", help="use your own .glb as the room")
+    pk.add_argument("glb", help="path to a self-contained .glb")
+    pk.add_argument("--name", help="what to call it (default: the file's name)")
+    pk.set_defaults(fn=cmd_pack)
 
     dm = sub.add_parser("daemon", help="run the daemon in the foreground")
     dm.add_argument("--lan", action="store_true", help="bind 0.0.0.0 (the headset needs this)")

@@ -87,6 +87,8 @@ glasshouse start claude-code ~/my-project   # an agent in a named tmux session (
 glasshouse config                           # your config.lua, restyles the headset live on save
 glasshouse doctor                           # what is installed, hooked and reachable
 glasshouse pin off                          # never let the headset shrink THIS session on your desktop
+glasshouse preset use cafe                  # what is behind the windows: cafe | nebula | void | passthrough
+glasshouse pack ~/rooms/loft.glb            # your own room instead — the daemon serves it to the headset
 glasshouse notify auto needs-input          # tell the daemon yourself, from any hook or script
 ```
 

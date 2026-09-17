@@ -9,7 +9,8 @@ class_name Backdrop
 ##                          baked lighting and a handful of slow animation loops
 ##       preset = "nebula"  the procedural sky that shipped first
 ##       preset = "void"    flat dark
-##   mode = "custom"       -> ⏳ your own .glb, not wired yet (falls back to default)
+##   mode = "custom"       -> your own .glb, fetched from the daemon at runtime
+##                          (`backdrop.custom.glb` on the host; `glasshouse pack`)
 ##
 ## ⭐ Glass is for the windows only; nothing here is glass.
 ##
@@ -27,6 +28,22 @@ var mode := "default"
 var preset := "nebula"
 var _players: Array = []
 var _anchor := Transform3D.IDENTITY
+
+# Which GLB `room` currently holds, so switching preset <-> custom rebuilds it.
+var _room_kind := ""
+
+# A custom backdrop arrives over the same link as the pixels. ⚠️ It is fetched,
+# never bundled: the .glb lives on the HOST (backdrop.custom.glb) and only the
+# daemon may hand it out, token-gated like everything else.
+const CACHE_GLB := "user://backdrop-custom.glb"
+const CACHE_TAG := "user://backdrop-custom.etag"
+var _src_host := ""
+var _src_port := 7570
+var _src_token := ""
+var _http: HTTPRequest
+var _fetching := false
+var _custom: Node3D                # built, waiting to be installed
+var _want_custom := false          # the config asked for a custom room
 
 
 ## Built in _init, not _ready, so `apply()` is safe the moment the node exists —
@@ -101,11 +118,18 @@ func apply(bd: Dictionary) -> void:
 	preset = str(d.get("preset", "nebula"))
 	var dim := clampf(float(d.get("dim", 0.0)), 0.0, 1.0)
 
-	if mode == "custom":
-		# ⏳ Not implemented: the daemon does not serve a user .glb yet. Say so
-		# once rather than silently showing the wrong thing.
-		print("[backdrop] custom mode is not wired yet — showing preset '%s'" % preset)
+	# A custom room cannot appear synchronously — it is a download. Show the
+	# preset now, swap the room in when it lands, and keep the preset if it
+	# never does. Nothing here blocks a config save from restyling the rest.
+	var want_custom := mode == "custom"
+	_want_custom = want_custom
+	if want_custom:
 		mode = "default"
+		if _custom != null:
+			_install_room(_custom, "custom")
+			_custom = null
+		else:
+			_fetch_custom()
 
 	# ⚠️ WorldEnvironment is a plain Node, not a VisualInstance3D — it has no
 	# `visible`. Switch the background mode instead.
@@ -113,10 +137,18 @@ func apply(bd: Dictionary) -> void:
 		env.background_mode = Environment.BG_CLEAR_COLOR
 		env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 		_show_room(false)
+	elif want_custom and _room_kind == "custom":
+		# The user's own room is up: light it like the café (baked colours) and
+		# leave the preset alone underneath.
+		env.background_mode = Environment.BG_COLOR
+		env.background_color = CAFE_CLEAR
+		env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+		env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
+		_show_room(true)
 	else:
 		match preset:
 			"cafe":
-				if _ensure_room():
+				if _ensure_room("cafe"):
 					env.background_mode = Environment.BG_COLOR
 					env.background_color = CAFE_CLEAR
 					env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
@@ -147,7 +179,8 @@ func apply(bd: Dictionary) -> void:
 	var room_dim := dim > 0.001 and room != null and room.visible
 	env.adjustment_enabled = room_dim
 	env.adjustment_brightness = 1.0 - 0.6 * dim if room_dim else 1.0
-	print("[backdrop] mode=%s preset=%s dim=%.2f" % [mode, preset, dim])
+	print("[backdrop] mode=%s preset=%s dim=%.2f%s"
+			% [mode, preset, dim, "  (custom)" if _room_kind == "custom" else ""])
 
 
 func _use_sky() -> void:
@@ -170,9 +203,11 @@ func _show_room(on: bool) -> void:
 
 
 ## Instantiate the café once. Returns false when the GLB is not in the build.
-func _ensure_room() -> bool:
-	if room != null:
+func _ensure_room(kind: String) -> bool:
+	if room != null and _room_kind == kind:
 		return true
+	if kind != "cafe":
+		return false
 	if not ResourceLoader.exists(CAFE_SCENE):
 		print("[backdrop] %s is not in this build" % CAFE_SCENE)
 		return false
@@ -180,14 +215,145 @@ func _ensure_room() -> bool:
 	if packed == null:
 		print("[backdrop] %s failed to load" % CAFE_SCENE)
 		return false
-	room = packed.instantiate() as Node3D
-	room.name = "Cafe"
+	var node := packed.instantiate() as Node3D
+	node.name = "Cafe"
+	_install_room(node, "cafe")
+	return true
+
+
+## Put a room in place, replacing whatever was there. One room exists at a time:
+## two GLBs of baked geometry is a lot of memory for something you cannot see.
+func _install_room(node: Node3D, kind: String) -> void:
+	if room != null:
+		remove_child(room)
+		room.queue_free()
+	_players.clear()
+	room = node
+	_room_kind = kind
 	room.transform = _anchor
 	add_child(room)
 	_fix_materials(room)
 	_start_loops(room)
-	print("[backdrop] café loaded: %d animation loop(s)" % _players.size())
+	print("[backdrop] %s room loaded: %d animation loop(s)" % [kind, _players.size()])
+
+
+# ── the user's own room ─────────────────────────────────────────
+
+## Where to fetch a custom backdrop from — the same host, port and token the
+## pixels come over. Set by the client once it is linked.
+func set_source(h: String, p: int, t: String) -> void:
+	if h == _src_host and p == _src_port and t == _src_token:
+		return
+	_src_host = h
+	_src_port = p
+	_src_token = t
+
+
+## Ask the daemon for `backdrop.custom.glb`. Cached on the device between runs:
+## re-downloading tens of megabytes at every launch over the headset's Wi-Fi is
+## the difference between a room that is there and a room that arrives later.
+func _fetch_custom() -> void:
+	if _fetching or _src_host == "" or not is_inside_tree():
+		return
+	_fetching = true
+	if _http == null:
+		_http = HTTPRequest.new()
+		_http.timeout = 60.0
+		_http.request_completed.connect(_on_custom_fetched)
+		add_child(_http)
+	var headers := PackedStringArray()
+	var tag := _cached_tag()
+	if tag != "" and FileAccess.file_exists(CACHE_GLB):
+		headers.append("If-None-Match: " + tag)
+	var url := "http://%s:%d/backdrop.glb?token=%s" % [_src_host, _src_port, _src_token.uri_encode()]
+	var err := _http.request(url, headers)
+	if err != OK:
+		_fetching = false
+		print("[backdrop] custom fetch could not start (%d) — keeping the preset" % err)
+
+
+func _on_custom_fetched(result: int, code: int, headers: PackedStringArray,
+		body: PackedByteArray) -> void:
+	_fetching = false
+	if result != HTTPRequest.RESULT_SUCCESS:
+		print("[backdrop] custom fetch failed (result %d) — keeping the preset" % result)
+		_use_cached_custom()
+		return
+	if code == 304:
+		_use_cached_custom()
+		return
+	if code != 200:
+		# 404 is the normal "the host is not configured for this" answer.
+		print("[backdrop] host has no custom backdrop (HTTP %d) — keeping the preset" % code)
+		return
+	var tag := ""
+	for h in headers:
+		if h.to_lower().begins_with("etag:"):
+			tag = h.substr(5).strip_edges()
+	if _build_custom(body):
+		_write_cache(body, tag)
+
+
+func _use_cached_custom() -> void:
+	if not FileAccess.file_exists(CACHE_GLB):
+		return
+	var f := FileAccess.open(CACHE_GLB, FileAccess.READ)
+	if f == null:
+		return
+	var bytes := f.get_buffer(f.get_length())
+	f.close()
+	_build_custom(bytes)
+
+
+## ⚠️ A .glb is self-contained, so it parses straight from the buffer with no
+## base path and nothing written to disk first. An unpacked .gltf with sidecar
+## textures would need one — which is exactly why only .glb is accepted.
+func _build_custom(bytes: PackedByteArray) -> bool:
+	if bytes.is_empty():
+		return false
+	var doc := GLTFDocument.new()
+	var st := GLTFState.new()
+	if doc.append_from_buffer(bytes, "", st) != OK:
+		print("[backdrop] custom .glb did not parse — keeping the preset")
+		return false
+	var node := doc.generate_scene(st) as Node3D
+	if node == null:
+		print("[backdrop] custom .glb has no scene — keeping the preset")
+		return false
+	node.name = "CustomRoom"
+	if not _want_custom:
+		# It arrived after the user moved on. Keep it — the next `apply()` with
+		# mode = "custom" installs it without another download.
+		_custom = node
+		return true
+	_install_room(node, "custom")
+	# Light it the way a baked room wants to be lit.
+	env.background_mode = Environment.BG_COLOR
+	env.background_color = CAFE_CLEAR
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
+	_show_room(true)
 	return true
+
+
+func _cached_tag() -> String:
+	if not FileAccess.file_exists(CACHE_TAG):
+		return ""
+	var f := FileAccess.open(CACHE_TAG, FileAccess.READ)
+	return "" if f == null else f.get_as_text().strip_edges()
+
+
+func _write_cache(bytes: PackedByteArray, tag: String) -> void:
+	var f := FileAccess.open(CACHE_GLB, FileAccess.WRITE)
+	if f == null:
+		return
+	f.store_buffer(bytes)
+	f.close()
+	if tag != "":
+		var t := FileAccess.open(CACHE_TAG, FileAccess.WRITE)
+		if t:
+			t.store_string(tag)
+			t.close()
 
 
 ## Play EVERY animation in the GLB at once, forever.

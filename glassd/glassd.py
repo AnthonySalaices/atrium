@@ -77,6 +77,7 @@ def authed(path, hdrs):
     auth = hdrs.get("authorization", "")
     return auth == "Bearer " + TOKEN
 import config as _config
+import files as _files
 
 _cfgwatch = None
 
@@ -513,6 +514,36 @@ def serve_conn(conn):
             conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
                          b"Access-Control-Allow-Origin: *\r\n"
                          + ("Content-Length: %d\r\n\r\n" % len(body)).encode() + body)
+            return
+
+        # ── the user's own backdrop ──────────────────────────────────────
+        # ⛔ One file, named by the config and never by the request. See files.py.
+        if path.split("?")[0] == "/backdrop.glb":
+            try:
+                cfg = cfgwatch().config or {}
+            except Exception:
+                cfg = {}
+            fp, why = _files.backdrop_path(cfg)
+            if fp is None:
+                body = json.dumps({"error": why}).encode()
+                conn.sendall(b"HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\n"
+                             + ("Content-Length: %d\r\n\r\n" % len(body)).encode() + body)
+                return
+            tag = _files.etag(fp)
+            if hdrs.get("if-none-match", "") == tag:
+                # The client already has this exact file cached on the device.
+                print("[glb] 304 %s" % os.path.basename(fp), flush=True)
+                conn.sendall(b"HTTP/1.1 304 Not Modified\r\nETag: " + tag.encode()
+                             + b"\r\nContent-Length: 0\r\n\r\n")
+                return
+            with open(fp, "rb") as fh:
+                data = fh.read()
+            print("[glb] 200 %s (%.1f MB)" % (os.path.basename(fp), len(data) / 1048576.0),
+                  flush=True)
+            conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: model/gltf-binary\r\n"
+                         + b"ETag: " + tag.encode() + b"\r\n"
+                         + b"Access-Control-Allow-Origin: *\r\n"
+                         + ("Content-Length: %d\r\n\r\n" % len(data)).encode() + data)
             return
 
         if path.startswith("/screen/"):
