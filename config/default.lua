@@ -127,11 +127,12 @@ return {
   -- AMBIENCE — the room tone.
   ----------------------------------------------------------------------------
   ambience = {
-    enabled = true,
-    volume = 0.10,       -- 0..1. Room tone, not music. Set enabled=false for silence.
-    -- The drone is SYNTHESISED, not a sample: it never loops audibly, weighs
-    -- nothing, and carries no licence. Sampled CC0 drones are mostly either
-    -- login-gated or actually CC-BY.
+    -- OFF by default. The synthesised drone that shipped with the nebula reads
+    -- as "a scary hum" in the café (first listener, 9/17). Café sound — typing,
+    -- a distant steam wand, optional chill music from your own folder — is the
+    -- planned replacement; until then, silence.
+    enabled = false,
+    volume = 0.10,       -- 0..1 when enabled. Room tone, not music.
   },
 
   ----------------------------------------------------------------------------

@@ -226,6 +226,9 @@ CC_MAP = {
     "SubagentStop":      ("working",     None,          False),
     "SessionEnd":        ("gone",        None,          False),
     "Interrupt":         ("idle",        "interrupted", False),
+    # Gemini CLI (and its forks) name the turn boundaries differently.
+    "BeforeAgent":       ("working",     None,          False),
+    "AfterAgent":        ("idle",        "turn-done",   True),
 }
 NOTIF_MAP = {
     "permission_prompt":  ("needs-input", "permission"),
@@ -249,7 +252,15 @@ def handle_event(ev):
     unread = None
     state = None
 
-    if hname == "agent-turn-complete":              # codex notify
+    if hname == "notify":
+        # Tier 1: `glasshouse notify <session> <state>` from any tool or script.
+        # The state is the caller's word for it, validated; nothing is inferred.
+        st = str(ev.get("state", ""))
+        if st not in STATES:
+            return
+        state, reason = st, str(ev.get("reason") or "notify")
+        unread = st in ("needs-input", "error", "done")
+    elif hname == "agent-turn-complete":            # codex `notify` (pre-hooks Codex)
         state, reason, unread = "idle", "turn-done", True
     elif hname in CC_MAP:
         state, reason, unread = CC_MAP[hname]

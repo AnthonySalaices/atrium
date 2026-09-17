@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+"""glasshouse — the host-side command.
+
+    glasshouse notify <session|auto> <state> [--reason R] [--detail D]
+        Tier-1 integration: tell the daemon what an agent is doing, from ANY
+        tool, hook system or script. `auto` = the tmux session this shell is in.
+        States: idle, working, needs-input, error, done, gone.
+
+    glasshouse hooks status|install|uninstall [harness|all] [--dry-run] [--path FILE]
+        Tier-2 integration: install the harness's own hook entries so the glow is
+        exact. Backs up, merges, re-parses, idempotent.
+
+    glasshouse doctor
+        What is installed, what is hooked, whether the daemon answers.
+
+Nothing here needs sudo, a model, or an API key.
+"""
+
+import argparse
+import json
+import os
+import socket
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(ROOT, "glassd"))
+import agents  # noqa: E402
+import hooks   # noqa: E402
+
+HOST = os.environ.get("GLASSHOUSE_HOST", "127.0.0.1")
+PORT = int(os.environ.get("GLASSHOUSE_PORT", "7570"))
+STATES = ("idle", "working", "needs-input", "error", "done", "gone")
+
+
+def tmux_session(pane=None):
+    pane = pane or os.environ.get("TMUX_PANE")
+    if not pane:
+        return None
+    try:
+        out = subprocess.run(["tmux", "display-message", "-p", "-t", pane, "#{session_name}"],
+                             capture_output=True, text=True, timeout=3).stdout.strip()
+        return out or None
+    except Exception:
+        return None
+
+
+def cmd_notify(a):
+    key = tmux_session() if a.session == "auto" else a.session
+    if not key:
+        sys.exit("glasshouse notify: not inside tmux and no session given")
+    if a.state not in STATES:
+        sys.exit("glasshouse notify: state must be one of %s" % ", ".join(STATES))
+    msg = {"src": "hook", "type": "notify", "key": key, "state": a.state,
+           "agent": a.agent or "notify", "pane": os.environ.get("TMUX_PANE")}
+    if a.reason:
+        msg["reason"] = a.reason
+    if a.detail:
+        msg["notification_text"] = a.detail[:280]
+    if a.title:
+        msg["title"] = a.title
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.sendto(json.dumps(msg).encode(), (HOST, PORT))
+    return 0
+
+
+def _print(res):
+    line = "  %-12s %-11s %s" % (res.harness, res.status, res.path or "")
+    if res.changes:
+        line += "  (" + ", ".join(res.changes) + ")"
+    if res.note:
+        line += "\n" + " " * 15 + res.note
+    print(line)
+
+
+def cmd_hooks(a):
+    targets = list(hooks.INSTALLERS) if a.harness in (None, "all") else [a.harness]
+    if a.action == "status":
+        for r in hooks.statuses(targets):
+            _print(r)
+        return 0
+    rc = 0
+    for h in targets:
+        inst = hooks.installer(h, a.path if len(targets) == 1 else None)
+        if inst is None:
+            _print(hooks.Result(h, "", "unsupported", note="no hooks system known; tier 3 only"))
+            continue
+        r = inst.apply(uninstall=(a.action == "uninstall"), dry_run=a.dry_run)
+        if a.dry_run and r.changes:
+            r.note = "--dry-run: nothing written"
+        if not r.changes and r.status != "invalid":
+            r.note = "nothing to do"
+        _print(r)
+        if r.status == "invalid":
+            rc = 1
+    return rc
+
+
+def cmd_doctor(a):
+    print("harnesses on $PATH:")
+    found = agents.installed()
+    for h, path in sorted(found.items()):
+        print("  %-12s %s" % (h, path))
+    if not found:
+        print("  (none) — install one: claude, codex, gemini, aider, opencode …")
+    print("hooks (tier 2):")
+    for r in hooks.statuses(sorted(found) if found else None):
+        _print(r)
+    print("daemon:")
+    try:
+        with socket.create_connection((HOST, PORT), timeout=2):
+            print("  answering on %s:%d" % (HOST, PORT))
+    except OSError as e:
+        print("  NOT reachable on %s:%d (%s) — run ./start.sh --lan" % (HOST, PORT, e))
+    return 0
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog="glasshouse", description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    n = sub.add_parser("notify", help="report an agent state (tier 1)")
+    n.add_argument("session", help="tmux session name, or 'auto'")
+    n.add_argument("state", choices=STATES)
+    n.add_argument("--reason")
+    n.add_argument("--detail")
+    n.add_argument("--title")
+    n.add_argument("--agent")
+    n.set_defaults(fn=cmd_notify)
+
+    h = sub.add_parser("hooks", help="harness hook installers (tier 2)")
+    h.add_argument("action", choices=["status", "install", "uninstall"])
+    h.add_argument("harness", nargs="?", help="claude-code | codex | gemini-cli | qwen-code | all")
+    h.add_argument("--dry-run", action="store_true")
+    h.add_argument("--path", help="settings file to edit instead of the default")
+    h.set_defaults(fn=cmd_hooks)
+
+    d = sub.add_parser("doctor", help="what is installed and reachable")
+    d.set_defaults(fn=cmd_doctor)
+
+    a = ap.parse_args(argv)
+    return a.fn(a)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -75,7 +75,14 @@ Three tiers of "the agent needs you":
 |---|---|---|
 | 3 universal | the pane's process tree contains a known harness; the last lines of the pane are scraped for that harness's prompt phrases | heuristic, rendered dimmer |
 | 2 hooks | the harness reports events (Claude Code hooks, Codex `notify`) through a fire-and-forget UDP shim | exact |
-| 1 user shim | anything calls `glasshouse notify` (planned) | exact |
+| 1 user shim | anything calls `glasshouse notify <session> <state>` | exact |
+
+Tier 2 installers live in `glassd/hooks.py`, one class per harness behind one interface
+(`bin/glasshouse hooks status|install|uninstall [harness]`): Claude Code and Codex share
+Claude's event names, Gemini CLI (and Qwen Code, its fork) use `BeforeAgent`/`AfterAgent`
+with millisecond timeouts and a named entry. Every installer backs up, merges, re-parses before
+replacing, is idempotent and removes only its own entries. ⚠️ Codex only loads hooks with
+`[features] hooks = true` in its config; the installer reports that, it never edits TOML.
 
 ⚠️ **Recognition walks the process tree, not one field.** tmux's `pane_current_command`
 becomes `bash` or `python3` the moment an agent runs a tool, and Node- or Python-hosted CLIs
