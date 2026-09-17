@@ -193,7 +193,8 @@ plus small glanceable tiles that carry a name, a state and a glow — never pros
 Pre-alpha, developed against one Quest 3 and one Linux host. Interfaces will change. The
 protocol is versioned (`proto`) but not yet stable. Issues and patches welcome, especially from
 anyone with different hardware; see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design
-and the hard-won gotchas, which are the most useful thing in this repo.
+and the hard-won gotchas, which are the most useful thing in this repo. Cutting a host release is
+[`docs/RELEASE.md`](docs/RELEASE.md).
 
 ## Licence
 
