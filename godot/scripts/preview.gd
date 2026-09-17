@@ -23,18 +23,19 @@ const DMM := 22.3
 const COLS := 80
 const ROWS := 28
 
+# Invented sessions. Nothing here is a real project.
 const FAKE := [
-	{"key": "glasshouse", "state": "needs-input"},
-	{"key": "ferusky", "state": "needs-input"},
-	{"key": "orca-sim", "state": "working"},
-	{"key": "stash", "state": "working"},
-	{"key": "westworld", "state": "idle"},
-	{"key": "vrflip", "state": "idle"},
-	{"key": "bf6-stats", "state": "idle"},
-	{"key": "aperture", "state": "idle"},
+	{"key": "api", "state": "needs-input"},
+	{"key": "billing", "state": "needs-input"},
+	{"key": "docs", "state": "working"},
+	{"key": "infra", "state": "working"},
+	{"key": "mobile", "state": "idle"},
+	{"key": "search", "state": "idle"},
+	{"key": "web", "state": "idle"},
+	{"key": "data", "state": "idle"},
 ]
-const FAKE_CURRENT := "glasshouse"      # on the focus panel
-const FAKE_FOCUS := "ferusky"           # the host's "waited longest" pick
+const FAKE_CURRENT := "api"             # on the focus panel
+const FAKE_FOCUS := "billing"           # the host's "waited longest" pick
 
 var font: FontFile
 var _frames := 0
@@ -71,13 +72,20 @@ func _ready() -> void:
 	var cam := Camera3D.new()
 	# ⚠️ `fov` is VERTICAL, and `keep_aspect = KEEP_WIDTH` does NOT change that —
 	# measuring a render proved it. Convert explicitly rather than trusting it.
-	cam.fov = rad_to_deg(2.0 * atan(tan(deg_to_rad(H_FOV) * 0.5) * 9.0 / 16.0))
+	# `--fov 104` reproduces the headset's field; a narrower value (say 80)
+	# makes a nicer showcase image because the flat projection stops stretching
+	# the edges. Layout judgements should use the default.
+	var hfov := float(_arg_value("--fov", str(H_FOV)))
+	cam.fov = rad_to_deg(2.0 * atan(tan(deg_to_rad(hfov) * 0.5) * 9.0 / 16.0))
 	# The seated eye point the café was built around: the room's origin is on the
 	# floor, the camera 1.2 m above it. The panels are placed relative to the eye.
 	var eye := Node3D.new()
 	eye.position = Vector3(0, 1.2, 0)
 	add_child(eye)
 	eye.add_child(cam)
+	# `--yaw -6` turns the camera (not the layout) so a showcase frames the rail
+	# and the window together; the layout stays where the headset puts it.
+	cam.rotation.y = deg_to_rad(float(_arg_value("--yaw", "0")))
 
 	var backdrop := Backdrop.new()
 	add_child(backdrop)
@@ -142,7 +150,8 @@ func _build_focus_panel(eye: Node3D) -> void:
 
 
 func _load_sample(grid: CellGrid) -> void:
-	var f := FileAccess.open("res://data/sample.txt", FileAccess.READ)
+	# `--sample <res path>` swaps the transcript, e.g. res://data/showcase.txt.
+	var f := FileAccess.open(_arg_value("--sample", "res://data/sample.txt"), FileAccess.READ)
 	if f == null:
 		return
 	var lines: Array = []
@@ -152,7 +161,12 @@ func _load_sample(grid: CellGrid) -> void:
 	# Fill every row by cycling the sample: a half-empty panel makes the layout
 	# look better than it is, and line density is what you are judging.
 	for y in range(ROWS):
-		var text: String = str(lines[y % lines.size()]) if lines.size() > 0 else ""
+		# A showcase transcript is shown once, not cycled; the layout sample cycles
+		# so every row is dense.
+		var cycle := not _arg_value("--sample", "").ends_with("showcase.txt")
+		var text: String = ""
+		if lines.size() > 0 and (cycle or y < lines.size()):
+			text = str(lines[y % lines.size()])
 		if text.length() < COLS:
 			text += " ".repeat(COLS - text.length())
 		# ⚠️ A line is {y, runs}, not a bare array — the array painted nothing.

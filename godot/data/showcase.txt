@@ -1,0 +1,33 @@
+> add rate limiting to the upload endpoint, 20 requests a minute per user
+
+● I'll look at how the upload route is wired before touching it.
+  Read 3 files
+● The endpoint lives in api/upload.py and already goes through the auth
+  middleware, so the user id is available on the request. I'll add a
+  token bucket keyed on that id and return 429 with a Retry-After header.
+  Edit api/upload.py, api/ratelimit.py
+● Added ratelimit.py: a small in-memory bucket (20/min, refills continuously)
+  and a decorator. Redis would be the next step if this runs on more than
+  one worker; I left a note where that plug goes.
+  Bash(python -m pytest tests/test_upload.py -q)
+  ..........                                                    [100%]
+  10 passed in 0.84s
+● Tests pass, including two new ones: the 21st request in a minute is
+  refused, and the bucket refills after the window.
+
+  ⚠ One thing worth flagging: the health check also hits /upload with a
+  HEAD request every 15 s. It shares the limiter today. Want it exempt?
+
+> yes, exempt HEAD and anything from the internal network
+
+● Exempting HEAD and 10.0.0.0/8 in the decorator, with a test for each.
+  Edit api/ratelimit.py, tests/test_upload.py
+  Bash(python -m pytest tests/ -q)
+  ..............                                                [100%]
+  14 passed in 1.02s
+● Done. Summary of the change:
+  - api/ratelimit.py — token bucket, 20 req/min per user, 429 + Retry-After
+  - HEAD requests and internal addresses bypass it
+  - 4 new tests, all green
+
+  Ready to commit when you are.
