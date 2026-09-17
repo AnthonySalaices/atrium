@@ -10,6 +10,20 @@
         Tier-2 integration: install the harness's own hook entries so the glow is
         exact. Backs up, merges, re-parses, idempotent.
 
+    glasshouse init [--yes] [--no-hooks] [--autostart|--no-autostart] [--dry-run]
+        First-time setup on this computer: checks, finds your agent harnesses,
+        offers their hooks, writes the config and token, starts the daemon on
+        the LAN, optionally registers it to start at login, prints the pairing
+        card. Safe to re-run; every step skips what is already done.
+
+    glasshouse start <harness> [dir] [--name NAME]
+        Start an agent in a new named tmux session and attach to it. The one
+        command a non-tmux user ever needs; Glasshouse finds the session by
+        what is running in it.
+
+    glasshouse config
+        Open your config.lua in $EDITOR (created from the starter if missing).
+
     glasshouse pair
         Print a one-time 6-digit code (valid 10 minutes) to type into the
         headset's pairing card. The APK ships with no secret; this is how it
@@ -193,6 +207,240 @@ def cmd_pair(a):
     return 0
 
 
+CONFIG_DIR = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), "glasshouse")
+USER_CONFIG = os.path.join(CONFIG_DIR, "config.lua")
+STARTER = os.path.join(ROOT, "config", "starter.lua")
+START_SH = os.path.join(ROOT, "start.sh")
+
+
+def _ok(msg): print("  ✓ " + msg)
+def _warn(msg): print("  ! " + msg)
+def _step(msg): print("\n" + msg)
+
+
+def _ask(q, default_yes=True, auto=None):
+    if auto is not None:
+        return auto
+    try:
+        r = input("  %s [%s] " % (q, "Y/n" if default_yes else "y/N")).strip().lower()
+    except EOFError:
+        return default_yes
+    if r == "":
+        return default_yes
+    return r.startswith("y")
+
+
+def _version_ok(text, want):
+    import re
+    m = re.search(r"(\d+)\.(\d+)", text or "")
+    if not m:
+        return False
+    return (int(m.group(1)), int(m.group(2))) >= want
+
+
+def ensure_config():
+    """Write the starter config once; never overwrite the user's file."""
+    if os.path.exists(USER_CONFIG):
+        return False
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    import shutil
+    shutil.copy(STARTER, USER_CONFIG)
+    return True
+
+
+def daemon_up():
+    try:
+        with socket.create_connection((HOST, PORT), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
+def _autostart_installed():
+    try:
+        out = subprocess.run(["crontab", "-l"], capture_output=True, text=True, timeout=5).stdout
+    except Exception:
+        return False
+    return "# glasshouse" in out
+
+
+def install_autostart(dry_run=False):
+    """Start at login without sudo: a systemd user unit where the bus exists,
+    otherwise cron (@reboot + a 5-minute keeper; start.sh is idempotent)."""
+    unit_dir = os.path.expanduser("~/.config/systemd/user")
+    have_user_bus = subprocess.run(["systemctl", "--user", "is-system-running"],
+                                   capture_output=True, text=True).returncode in (0, 1) and \
+        "No medium" not in subprocess.run(["systemctl", "--user", "is-system-running"],
+                                          capture_output=True, text=True).stderr
+    if have_user_bus:
+        unit = os.path.join(unit_dir, "glasshouse.service")
+        text = ("[Unit]\nDescription=Glasshouse daemon\nAfter=network-online.target\n\n"
+                "[Service]\nExecStart=%s %s\nRestart=on-failure\nEnvironment=GLASSHOUSE_BIND=0.0.0.0\n\n"
+                "[Install]\nWantedBy=default.target\n" % (sys.executable, os.path.join(ROOT, "glassd", "glassd.py")))
+        if dry_run:
+            return "would write %s and enable it" % unit
+        os.makedirs(unit_dir, exist_ok=True)
+        with open(unit, "w") as f:
+            f.write(text)
+        subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
+        subprocess.run(["systemctl", "--user", "enable", "--now", "glasshouse.service"], capture_output=True)
+        return "systemd user unit %s enabled" % unit
+    if _autostart_installed():
+        return "cron entries already present"
+    lines = ["@reboot sleep 20 && %s --lan # glasshouse" % START_SH,
+             "*/5 * * * * %s --lan >/dev/null 2>&1 # glasshouse keeper" % START_SH]
+    if dry_run:
+        return "would add to crontab: " + " | ".join(lines)
+    cur = subprocess.run(["crontab", "-l"], capture_output=True, text=True).stdout
+    new = cur.rstrip("\n") + ("\n" if cur.strip() else "") + "\n".join(lines) + "\n"
+    subprocess.run(["crontab", "-"], input=new, text=True, check=True)
+    return "cron: @reboot + 5-minute keeper added"
+
+
+def cmd_init(a):
+    auto = True if a.yes else None
+    print("Glasshouse setup — every step skips what is already done.")
+
+    _step("1. Checks")
+    tm = subprocess.run(["tmux", "-V"], capture_output=True, text=True).stdout if _which("tmux") else ""
+    if _version_ok(tm, (3, 2)):
+        _ok(tm.strip())
+    else:
+        _warn("tmux 3.2+ is required (found: %s). Install it: apt install tmux / brew install tmux"
+              % (tm.strip() or "none"))
+        return 1
+    if sys.version_info >= (3, 9):
+        _ok("python %d.%d" % sys.version_info[:2])
+    else:
+        _warn("python 3.9+ is required"); return 1
+    lua = os.path.join(ROOT, "vendor", "lua", "bin", "lua")
+    if os.path.exists(lua):
+        _ok("config evaluator built")
+    elif a.dry_run:
+        _warn("config evaluator not built — would run tools/build-lua.sh")
+    else:
+        _warn("config evaluator not built — building (needs make + a C compiler)")
+        r = subprocess.run([os.path.join(ROOT, "tools", "build-lua.sh")], capture_output=True, text=True)
+        if r.returncode != 0 or not os.path.exists(lua):
+            _warn("build failed:\n" + (r.stderr or r.stdout)[-800:]); return 1
+        _ok("built")
+
+    _step("2. Agent harnesses on this computer")
+    found = agents.installed()
+    if not found:
+        _warn("none found on $PATH. Install one (claude, codex, gemini, aider, opencode…) and re-run;")
+        _warn("Glasshouse still shows any of them the moment they run inside tmux.")
+    for h, path in sorted(found.items()):
+        tier = "exact (hooks available)" if h in hooks.INSTALLERS else "heuristic (no hooks system)"
+        _ok("%-12s %s — %s" % (h, path, tier))
+
+    _step("3. Hooks — let each harness report its own state")
+    if a.no_hooks:
+        print("  skipped (--no-hooks)")
+    else:
+        for h in sorted(found):
+            inst = hooks.installer(h)
+            if inst is None:
+                continue
+            st = inst.status()
+            if st.status == "installed":
+                _ok("%s already hooked" % h); continue
+            if st.status == "invalid":
+                _warn("%s: %s is not valid JSON — fix it, then `glasshouse hooks install %s`" % (h, st.path, h)); continue
+            if _ask("Install hooks for %s (%s)?" % (h, st.path), True, auto):
+                r = inst.apply(dry_run=a.dry_run)
+                _ok("%s: %s%s" % (h, ", ".join(r.changes) or "nothing to do",
+                                  " (dry run)" if a.dry_run else ""))
+                if h == "codex" and inst.feature_enabled() is False:
+                    _warn("Codex loads hooks only with `[features] hooks = true` in ~/.codex/config.toml")
+
+    _step("4. Config and token")
+    if a.dry_run:
+        _ok("%s %s" % (USER_CONFIG, "exists" if os.path.exists(USER_CONFIG) else "would be created from the starter"))
+    elif ensure_config():
+        _ok("wrote %s (all defaults, commented) — `glasshouse config` opens it" % USER_CONFIG)
+    else:
+        _ok("%s exists, left alone" % USER_CONFIG)
+
+    _step("5. Daemon")
+    if daemon_up():
+        _ok("already running on port %d" % PORT)
+    elif a.dry_run:
+        _ok("would run %s --lan" % START_SH)
+    else:
+        r = subprocess.run([START_SH, "--lan"], capture_output=True, text=True)
+        print("  " + (r.stdout.strip() or r.stderr.strip()))
+        if not daemon_up():
+            _warn("daemon did not come up — see logs/glassd.log"); return 1
+    tokpath = os.path.join(CONFIG_DIR, "token")
+    _ok("token at %s" % tokpath) if os.path.exists(tokpath) else _warn("no token yet")
+
+    _step("6. Start at login")
+    want = a.autostart if a.autostart is not None else \
+        _ask("Start the daemon automatically at login (no sudo needed)?", True, auto)
+    if want:
+        _ok(install_autostart(dry_run=a.dry_run))
+    else:
+        print("  skipped — run `%s --lan` when you want it" % START_SH)
+
+    _step("7. Pair the headset")
+    if a.dry_run or not daemon_up():
+        print("  (run `glasshouse pair` when the daemon is up)")
+    else:
+        cmd_pair(a)
+    print("Next: open Glasshouse in the headset and enter the code. Then `glasshouse start claude` "
+          "(or any harness) on this computer.")
+    return 0
+
+
+def _which(name):
+    from shutil import which
+    return which(name)
+
+
+def cmd_start(a):
+    t = agents.table()
+    row = t.get(a.harness)
+    if row is None:
+        # Allow a raw command too: `glasshouse start ./my-agent.sh`
+        if _which(a.harness) or os.path.exists(a.harness):
+            row = {"match": [a.harness]}
+        else:
+            sys.exit("glasshouse start: unknown harness %r — one of: %s" % (a.harness, ", ".join(sorted(t))))
+    exe = next((m for m in row["match"] if _which(m)), None)
+    if exe is None:
+        sys.exit("glasshouse start: %s is not on $PATH" % " / ".join(row["match"]))
+    d = os.path.abspath(os.path.expanduser(a.dir or "."))
+    base = os.path.basename(d.rstrip("/")) or "home"
+    name = a.name or ("%s-%s" % (a.harness if a.harness in t else base, base) if a.harness in t else base)
+    # tmux forbids '.' and ':' in session names
+    name = name.replace(".", "-").replace(":", "-")
+    existing = subprocess.run(["tmux", "list-sessions", "-F", "#{session_name}"],
+                              capture_output=True, text=True).stdout.split()
+    n, cand = 2, name
+    while cand in existing:
+        cand = "%s-%d" % (name, n); n += 1
+    name = cand
+    cmd = [exe] + list(getattr(a, "args", []) or [])
+    r = subprocess.run(["tmux", "new-session", "-d", "-s", name, "-c", d] + cmd,
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        sys.exit("glasshouse start: tmux failed: " + (r.stderr.strip() or r.stdout.strip()))
+    print("started %s in %s (tmux session %r)" % (" ".join(cmd), d, name))
+    if a.detach:
+        return 0
+    if os.environ.get("TMUX"):
+        os.execvp("tmux", ["tmux", "switch-client", "-t", name])
+    os.execvp("tmux", ["tmux", "attach-session", "-t", name])
+
+
+def cmd_config(a):
+    if ensure_config():
+        print("created %s" % USER_CONFIG)
+    editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vi"
+    os.execvp(editor, [editor, USER_CONFIG])
+
+
 def cmd_doctor(a):
     print("harnesses on $PATH:")
     found = agents.installed()
@@ -233,13 +481,42 @@ def main(argv=None):
     h.add_argument("--path", help="settings file to edit instead of the default")
     h.set_defaults(fn=cmd_hooks)
 
+    i = sub.add_parser("init", help="first-time setup on this computer")
+    i.add_argument("--yes", "-y", action="store_true", help="answer yes to every prompt")
+    i.add_argument("--no-hooks", action="store_true")
+    i.add_argument("--autostart", dest="autostart", action="store_true", default=None)
+    i.add_argument("--no-autostart", dest="autostart", action="store_false")
+    i.add_argument("--dry-run", action="store_true", help="show the plan, change nothing")
+    i.set_defaults(fn=cmd_init)
+
+    st = sub.add_parser("start", help="start an agent in a new tmux session")
+    st.add_argument("harness", help="claude-code | codex | gemini-cli | aider | … or a command")
+    st.add_argument("dir", nargs="?", help="working directory (default: here)")
+    st.add_argument("--name", help="tmux session name")
+    st.add_argument("--detach", "-d", action="store_true", help="do not attach")
+    st.epilog = "Arguments for the harness itself go after `--`."
+
+    st.set_defaults(fn=cmd_start)
+
+    c = sub.add_parser("config", help="open your config.lua")
+    c.set_defaults(fn=cmd_config)
+
     pr = sub.add_parser("pair", help="print a one-time pairing code for the headset")
     pr.set_defaults(fn=cmd_pair)
 
     d = sub.add_parser("doctor", help="what is installed and reachable")
     d.set_defaults(fn=cmd_doctor)
 
+    argv = list(sys.argv[1:] if argv is None else argv)
+    # `start … -- <harness args>`: everything after `--` belongs to the harness,
+    # and must not be parsed here (REMAINDER would also eat our own options).
+    extra = []
+    if argv and argv[0] == "start" and "--" in argv:
+        i = argv.index("--")
+        extra, argv = argv[i + 1:], argv[:i]
     a = ap.parse_args(argv)
+    if a.cmd == "start":
+        a.args = extra
     return a.fn(a)
 
 
