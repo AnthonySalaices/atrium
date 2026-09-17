@@ -488,6 +488,71 @@ def cmd_config(a):
     os.execvp(editor, [editor, USER_CONFIG])
 
 
+def _tmux(*args):
+    try:
+        p = subprocess.run(["tmux"] + list(args), capture_output=True, text=True, timeout=5)
+    except Exception:
+        return None
+    return p.stdout.strip() if p.returncode == 0 else None
+
+
+def cmd_pin(a):
+    """Per-session opt-out of headset geometry.
+
+    The headset asks the daemon to resize a watched tmux window to its own
+    cols x rows, and tmux windows have ONE size shared by every attached
+    client — so the same window shrinks on your desktop. `pin off` marks the
+    window so it is never resized; the headset gets a crop of it instead."""
+    import pin as _pin
+    if a.action == "status":
+        names = _tmux("list-sessions", "-F", "#{session_name}") or ""
+        if not names:
+            print("no tmux sessions")
+            return 0
+        print("%-20s %-9s %-8s %-6s %s" % ("session", "size", "window-size", "pin", "restore record"))
+        for k in names.split("\n"):
+            geo = _tmux("display-message", "-p", "-t", k, "#{window_width}x#{window_height}") or "?"
+            ws = _tmux("show-options", "-w", "-v", "-t", k, "window-size") or "(unset)"
+            state = "off" if _pin.opted_out(k) else "on"
+            rec = _tmux("show-options", "-w", "-v", "-t", k, _pin.PREV_OPT) or "-"
+            print("%-20s %-9s %-11s %-6s %s" % (k, geo, ws, state, rec))
+        return 0
+    key = a.session
+    if not key:
+        if not os.environ.get("TMUX"):
+            print("not inside tmux — name the session: glasshouse pin %s <session>" % a.action,
+                  file=sys.stderr)
+            return 2
+        key = _tmux("display-message", "-p", "#S")
+        if not key:
+            print("could not read the current tmux session", file=sys.stderr)
+            return 2
+    if _tmux("has-session", "-t", key) is None:
+        print("no tmux session named %r" % key, file=sys.stderr)
+        return 2
+    if a.action == "off":
+        if _tmux("set-option", "-w", "-t", key, _pin.PIN_OPT, "off") is None:
+            print("tmux refused to set %s on %s" % (_pin.PIN_OPT, key), file=sys.stderr)
+            return 1
+        # If it is pinned right now, put it back immediately.
+        rec = _tmux("show-options", "-w", "-v", "-t", key, _pin.PREV_OPT)
+        if rec and "|" in rec:
+            size, cols, rows = rec.split("|")[:3]
+            _tmux("resize-window", "-t", key, "-x", cols, "-y", rows)
+            if size == "-":
+                _tmux("set-option", "-w", "-u", "-t", key, "window-size")
+            else:
+                _tmux("set-option", "-w", "-t", key, "window-size", size)
+            _tmux("set-option", "-w", "-u", "-t", key, _pin.PREV_OPT)
+            print("%s: restored to %sx%s" % (key, cols, rows))
+        print("%s: the headset will never resize this session (shows a crop instead)" % key)
+        print("   undo with: glasshouse pin on %s" % key)
+    else:
+        _tmux("set-option", "-w", "-u", "-t", key, _pin.PIN_OPT)
+        print("%s: the headset may resize this session while watching it" % key)
+    return 0
+
+
 def cmd_doctor(a):
     print("harnesses on $PATH:")
     found = agents.installed()
@@ -548,6 +613,13 @@ def main(argv=None):
 
     c = sub.add_parser("config", help="open your config.lua")
     c.set_defaults(fn=cmd_config)
+
+    pn = sub.add_parser("pin", help="stop the headset shrinking a session on your desktop")
+    pn.add_argument("action", choices=("off", "on", "status"),
+                    help="off = never resize this session (headset shows a crop); "
+                         "on = allow again; status = every session's geometry")
+    pn.add_argument("session", nargs="?", help="tmux session (default: the one you are in)")
+    pn.set_defaults(fn=cmd_pin)
 
     dm = sub.add_parser("daemon", help="run the daemon in the foreground")
     dm.add_argument("--lan", action="store_true", help="bind 0.0.0.0 (the headset needs this)")

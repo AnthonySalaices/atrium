@@ -5,8 +5,19 @@ previous value and a restore path. A host running `window-size latest` with real
 real panes are ~258x62; leaving one at 80x28 after the headset drops off the
 network would break their desktop work every single day.
 
-Restore fires on: unsubscribe, client disconnect, a silence watchdog, and
-tools/unpin.sh as a manual escape hatch.
+Restore fires on: unsubscribe, client disconnect, a silence watchdog, daemon
+exit (SIGTERM/SIGINT), daemon start (`recover`), and tools/unpin.sh as a
+manual escape hatch.
+
+⚠️ The restore record lives ON THE TMUX WINDOW (`@glasshouse_prev`), not only
+in this process. 9/17 the daemon was restarted while a window was pinned; the
+new process saw "80x28, manual" as the previous geometry and could never put
+the desktop back — the user's desktop session stayed shrunk. A tmux user option
+survives us; an in-memory dict does not.
+
+A window can opt out of pinning entirely: `tmux set -w @glasshouse_pin off`
+(`glasshouse pin off`). The headset then receives a crop of the desktop-sized
+pane instead (see screen.crop_frame).
 """
 
 import subprocess
@@ -21,6 +32,9 @@ TMUX = "/usr/bin/tmux"
 # instead of wrapping" (owner, 9/17). Ten minutes covers a coffee break; the
 # daily pane still comes back if the headset really is gone.
 SILENCE_TIMEOUT = 600.0
+
+PIN_OPT = "@glasshouse_pin"     # user-set on a window: "off" = never resize this one
+PREV_OPT = "@glasshouse_prev"   # daemon-set: "<window-size>|<cols>|<rows>", "-" = unset
 
 _lock = threading.Lock()
 _pinned = {}                  # key -> {"size": str, "cols": int, "rows": int, "seen": float}
@@ -45,22 +59,77 @@ def _get_window_size(key):
     return v if v else None
 
 
+def opted_out(key):
+    """True when the window carries `@glasshouse_pin off`."""
+    v = _tmux(["show-options", "-w", "-v", "-t", key, PIN_OPT])
+    return (v or "").strip().lower() in ("off", "0", "no", "false")
+
+
+def is_pinned(key):
+    with _lock:
+        return key in _pinned
+
+
+def _read_prev(key):
+    """The restore record a previous daemon left on the window, or None."""
+    v = _tmux(["show-options", "-w", "-v", "-t", key, PREV_OPT])
+    if not v or "|" not in v:
+        return None
+    parts = v.split("|")
+    try:
+        size = None if parts[0] in ("", "-") else parts[0]
+        return {"size": size, "cols": int(parts[1]), "rows": int(parts[2])}
+    except (IndexError, ValueError):
+        return None
+
+
+def _write_prev(key, size, cols, rows):
+    _tmux(["set-option", "-w", "-t", key, PREV_OPT,
+           "%s|%d|%d" % (size if size else "-", cols, rows)])
+
+
+def _clear_prev(key):
+    _tmux(["set-option", "-w", "-u", "-t", key, PREV_OPT])
+
+
+def _current_geometry(key):
+    cur = _tmux(["display-message", "-p", "-t", key, "#{window_width}\t#{window_height}"])
+    if cur and "\t" in cur:
+        a, b = cur.split("\t")[:2]
+        try:
+            return int(a), int(b)
+        except ValueError:
+            pass
+    return 0, 0
+
+
 def pin(key, cols, rows):
-    """Resize `key` to cols x rows, remembering what it was."""
+    """Resize `key` to cols x rows, remembering what it was.
+
+    Returns False without touching the window when it is opted out."""
     with _lock:
         if key in _pinned:
             _pinned[key]["seen"] = time.time()
             return True
-        prev = _get_window_size(key)        # None = was unset
-        cur = _tmux(["display-message", "-p", "-t", key, "#{window_width}\t#{window_height}"])
-        pc, pr = (0, 0)
-        if cur and "\t" in cur:
-            a, b = cur.split("\t")[:2]
-            try:
-                pc, pr = int(a), int(b)
-            except ValueError:
-                pass
+        if opted_out(key):
+            return False
+        rec = _read_prev(key)
+        adopted = rec is not None
+        if adopted:
+            # A previous daemon pinned this window and never restored it. Its
+            # record is the truth; what tmux reports now is VR geometry.
+            prev, pc, pr = rec["size"], rec["cols"], rec["rows"]
+            print("[pin] %s adopting restore record left by a previous daemon (%dx%d, window-size %s)"
+                  % (key, pc, pr, prev if prev else "<unset>"), flush=True)
+        else:
+            prev = _get_window_size(key)        # None = was unset
+            pc, pr = _current_geometry(key)
+            _write_prev(key, prev, pc, pr)
         if _tmux(["set-option", "-w", "-t", key, "window-size", "manual"]) is None:
+            # ⚠️ Only drop a record we wrote ourselves a few lines ago. An
+            # adopted one is the last surviving copy of the desktop geometry.
+            if not adopted:
+                _clear_prev(key)
             return False
         _tmux(["resize-window", "-t", key, "-x", str(cols), "-y", str(rows)])
         _pinned[key] = {"size": prev, "cols": pc, "rows": pr, "seen": time.time()}
@@ -95,6 +164,7 @@ def unpin(key):
         _tmux(["set-option", "-w", "-t", key, "window-size", st["size"]])
         if st["size"] == "manual" and st["cols"] and st["rows"]:
             _tmux(["resize-window", "-t", key, "-x", str(st["cols"]), "-y", str(st["rows"])])
+    _clear_prev(key)
     print("[pin] %s restored (window-size %s)"
           % (key, st["size"] if st["size"] else "<unset>"), flush=True)
     return True
@@ -103,6 +173,50 @@ def unpin(key):
 def unpin_all():
     for key in list(_pinned.keys()):
         unpin(key)
+
+
+def recover():
+    """Daemon start: put back any window a previous daemon left pinned.
+
+    Nothing is subscribed yet at this point, so every leftover record is a
+    window somebody is looking at on their desktop at headset geometry."""
+    names = _tmux(["list-sessions", "-F", "#{session_name}"]) or ""
+    n = 0
+    for key in names.split("\n"):
+        key = key.strip()
+        if not key:
+            continue
+        rec = _read_prev(key)
+        if rec is None:
+            continue
+        with _lock:
+            _pinned[key] = dict(rec, seen=0.0)
+        print("[pin] %s left pinned by a previous daemon — restoring" % key, flush=True)
+        unpin(key)
+        n += 1
+    return n
+
+
+def install_exit_hooks():
+    """SIGTERM/SIGINT/atexit -> restore every pin before the process dies.
+
+    Threads are daemonic, so without this a plain `kill` leaves every watched
+    window at VR geometry with only the on-window record to recover from."""
+    import atexit
+    import os
+    import signal
+
+    atexit.register(unpin_all)
+
+    def _bye(signum, frame):
+        unpin_all()
+        os._exit(0)
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            signal.signal(sig, _bye)
+        except (ValueError, OSError):
+            pass
 
 
 def watchdog_loop():

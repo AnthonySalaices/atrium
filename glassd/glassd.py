@@ -7,7 +7,7 @@ TCP  :PORT  clients:  GET /state  -> JSON snapshot
                       GET /ws     -> RFC6455 WebSocket (Godot WebSocketPeer)
                       GET /events -> SSE (browser debug)
 """
-import base64, hashlib, json, os, selectors, socket, struct, subprocess, threading, time
+import base64, hashlib, json, os, re, selectors, socket, struct, subprocess, threading, time
 
 PORT = int(os.environ.get("GLASSHOUSE_PORT", "7570"))
 BIND = os.environ.get("GLASSHOUSE_BIND", "127.0.0.1")
@@ -117,7 +117,7 @@ def screen_loop():
                     continue
                 for c in list(_clients):
                     if c.alive and key in c.subs:
-                        c.send(msg)
+                        c.send(c.view(key, msg))
         except Exception:
             pass
         time.sleep(0.08)
@@ -140,6 +140,24 @@ def config_poll_loop():
 
 _mirrors = {}
 _mirrors_lock = threading.Lock()
+
+
+def pin_excluded(key):
+    """Never resize this window: the tmux option (`glasshouse pin off`) or a
+    `sessions.pin_exclude` pattern in config.lua."""
+    if _pin.opted_out(key):
+        return True
+    try:
+        cfg = cfgwatch().config or {}
+    except Exception:
+        return False
+    for pat in ((cfg.get("sessions") or {}).get("pin_exclude") or []):
+        try:
+            if re.search(str(pat), key):
+                return True
+        except re.error:
+            continue
+    return False
 
 
 def mirror_for(key):
@@ -338,6 +356,17 @@ class Client:
     def __init__(self, conn, kind):
         self.conn, self.kind, self.alive = conn, kind, True
         self.subs = set()          # tmux session names this client wants pixels for
+        self.want = {}             # key -> (cols, rows) the client asked for
+
+    def view(self, key, msg):
+        """A screen message as THIS client should see it. A pinned window
+        already has the client's geometry; an opted-out one is cropped."""
+        if not msg or _pin.is_pinned(key):
+            return msg
+        cols, rows = self.want.get(key, (0, 0))
+        if cols <= 0 or rows <= 0:
+            return msg
+        return _screen.crop_frame(msg, cols, rows)
 
     def send(self, obj):
         try:
@@ -556,8 +585,13 @@ def ws_reader(c):
                     c.subs.add(key)
                     cols = int(msg.get("cols", 0) or 0)
                     rows = int(msg.get("rows", 0) or 0)
+                    c.want[key] = (cols, rows)
                     if cols > 0 and rows > 0:
-                        _pin.pin(key, cols, rows)
+                        if pin_excluded(key):
+                            print("[pin] %s opted out — streaming a %dx%d crop, desktop untouched"
+                                  % (key, cols, rows), flush=True)
+                        else:
+                            _pin.pin(key, cols, rows)
                     # A session you are WATCHING must appear in the switcher even
                     # if no agent has reported state for it — otherwise the panel
                     # you are looking at is missing from the list you cycle
@@ -569,7 +603,7 @@ def ws_reader(c):
                         m = mirror_for(key)
                         full = m.full()
                         if full:
-                            c.send(full)
+                            c.send(c.view(key, full))
                     except Exception as e:
                         c.send({"type": "error", "key": key, "error": str(e)})
                 elif msg.get("op") == "unsubscribe" and msg.get("key"):
@@ -580,7 +614,7 @@ def ws_reader(c):
                     try:
                         full = mirror_for(msg["key"]).full()
                         if full:
-                            c.send(full)
+                            c.send(c.view(msg["key"], full))
                     except Exception:
                         pass
                 elif msg.get("op") == "keys" and msg.get("key"):
@@ -713,6 +747,8 @@ def poll_loop():
 
 
 def main():
+    _pin.install_exit_hooks()
+    _pin.recover()
     for fn in (udp_loop, tcp_loop, poll_loop, config_poll_loop, screen_loop,
                _pin.watchdog_loop):
         threading.Thread(target=fn, daemon=True).start()

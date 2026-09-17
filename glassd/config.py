@@ -201,6 +201,16 @@ def validate(cfg):
     if changed:
         note("sessions.max_panels clamped to %d (Meta's layer budget)" % int(v))
     sess["max_panels"] = int(v)
+    pe = sess.get("pin_exclude")
+    if pe is None or isinstance(pe, dict) and not pe:
+        pe = []
+    if not isinstance(pe, list):
+        note("sessions.pin_exclude must be a list of patterns — ignored")
+        pe = []
+    bad = [x for x in pe if not isinstance(x, str)]
+    if bad:
+        note("sessions.pin_exclude: %d non-string entries ignored" % len(bad))
+    sess["pin_exclude"] = [x for x in pe if isinstance(x, str)]
 
     return notes
 

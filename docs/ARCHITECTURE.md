@@ -108,7 +108,7 @@ header. Client → host operations:
 
 | op | meaning |
 |---|---|
-| `subscribe` | start streaming a session; optionally pin it to `cols` × `rows` |
+| `subscribe` | start streaming a session; optionally pin it to `cols` × `rows` (a session with `@glasshouse_pin off` or matching `sessions.pin_exclude` is never resized — the client gets a bottom-left crop instead, flagged `cropped: [cols, rows]`) |
 | `unsubscribe` | stop, and restore the window's previous geometry |
 | `resync` | ask for a full frame instead of a diff (after a local rebuild) |
 | `keys` | type — see below |
@@ -330,6 +330,15 @@ Vendor option names are effectively undocumented; extract them from the plugin b
   its size from, so a client that dies without unsubscribing would leave someone's daily terminal
   reflowed. Hence: restore on unsubscribe, on disconnect, on a silence watchdog, and manually via
   `tools/unpin.sh`.
+- ⚠️ **The restore record must outlive the daemon.** Restarting the daemon while a window was
+  pinned once made the new process record the *pinned* geometry as "previous", so every restore
+  afterwards put the window back to 80x28. The record is now a tmux user option on the window
+  (`@glasshouse_prev = "<window-size>|<cols>|<rows>"`): a new daemon adopts it instead of what
+  tmux reports, `recover()` restores leftovers at start, and SIGTERM/SIGINT restore before exit.
+- ⚠️ **A tmux window has one size for every attached client.** Pinning a session the user is also
+  looking at on a desktop shrinks it there too. `glasshouse pin off` (`@glasshouse_pin off`) or
+  `sessions.pin_exclude` opts a session out; the host then serves `screen.crop_frame` — the
+  bottom `rows` lines and leftmost `cols` cells — so the headset panel keeps its geometry.
 - ⚠️ `pkill -f <pattern>` matches the command line of the shell that invoked it, so it kills its
   own caller. Find the pid from the listening socket instead.
 

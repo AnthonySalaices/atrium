@@ -193,6 +193,12 @@ return {
     fixed = {},                   -- session names, in the order you want them
     title = "pane",               -- "pane" uses the agent's own summary line
     max_panels = 8,
+    -- A watched window is normally resized to the headset's cols x rows, and a
+    -- tmux window has ONE size for every attached client — so it shrinks on
+    -- your desktop too. Sessions matching these patterns are never resized;
+    -- the headset shows the bottom-left crop of the desktop-sized pane
+    -- instead. Same as `glasshouse pin off` inside a session, but permanent.
+    pin_exclude = {},             -- Python regexes, e.g. { "^cc-1$", "desk" }
   },
 
   ----------------------------------------------------------------------------

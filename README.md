@@ -86,6 +86,7 @@ ctrl+alt+P in the headset opens the card again.
 glasshouse start claude-code ~/my-project   # an agent in a named tmux session (any harness)
 glasshouse config                           # your config.lua, restyles the headset live on save
 glasshouse doctor                           # what is installed, hooked and reachable
+glasshouse pin off                          # never let the headset shrink THIS session on your desktop
 glasshouse notify auto needs-input          # tell the daemon yourself, from any hook or script
 ```
 
