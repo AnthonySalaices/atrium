@@ -21,15 +21,30 @@ var rig: Node3D
 var cam: XRCamera3D
 var client: GlassClient
 var grid: CellGrid
-var status: Label
 var font: FontFile
 var viewport: SubViewport
 var layer: OpenXRCompositionLayerQuad
 var xr_interface: OpenXRInterface
-var world_env: WorldEnvironment
-var sky_mat: ShaderMaterial
+var backdrop: Backdrop
 var ambience: Ambience
 var router: InputRouter
+
+# The focus window: an oriented group holding the glass frame (in-scene geometry,
+# with the title strip drawn into its texture) and the composition layer inset
+# inside it. ⚠️ The layer composites OVER the scene and never depth-sorts, so
+# the frame simply sits 4 mm behind it — that IS the hybrid AS-0001 asked for.
+var focus_group: Node3D
+var frame_vp: SubViewport
+var title_left: Label
+var title_right: Label
+var link_text := ""              # non-empty while not connected
+
+# The rail of session cards to the left. Rebuilt whenever the session list
+# changes; cheap, and far simpler than diffing four quads.
+var rail_root: Node3D
+var waiting_cards: Array = []    # ShaderMaterials whose edge breathes
+var pulse_enabled := true
+var _t := 0.0
 
 # The host sends sessions in a STABLE order (by name, never by urgency) so a
 # panel never moves because it became urgent — see glassd/focus.py. Cycling walks
@@ -46,6 +61,7 @@ var cols := 80
 var rows := 28
 var dmm := 22.3          # ⭐ chosen by eye in-headset from an 18/20/22.3/26/32 ladder
 var distance := 1.5
+var pitch_deg := GlassUI.FOCUS_ELEV_DEG
 
 
 func _ready() -> void:
@@ -71,6 +87,8 @@ func _ready() -> void:
 
 	_build_backdrop()
 	_build_panel()
+	rail_root = Node3D.new()
+	rig.add_child(rail_root)
 
 	client = GlassClient.new()
 	client.host = _read_data_file("host.txt", HOST_FALLBACK)
@@ -81,17 +99,19 @@ func _ready() -> void:
 	client.link_state.connect(func(t):
 		# Only show link state while it is not connected; once it is, the label
 		# belongs to the switcher (session name + how many are waiting).
-		if t == "connected":
-			_update_status()
-		else:
-			status.text = t
+		link_text = "" if t == "connected" else t
+		_update_status()
 		print("[term] link: " + t))
 	client.keys_ack.connect(_on_keys_ack)
 	client.sessions.connect(_on_sessions)
-	client.focus_hint.connect(func(k): focus_key = k)
+	client.focus_hint.connect(func(k):
+		if k != focus_key:
+			focus_key = k
+			_rebuild_rail())
 	client.start()
 	session = _read_data_file("session.txt", SESSION_FALLBACK)
 	client.subscribe(session, cols, rows)
+	_update_status()
 
 	# M4: the panel is no longer read-only.
 	router = InputRouter.new()
@@ -121,56 +141,25 @@ func _on_frame(m: Dictionary) -> void:
 				   m.get("lines", []).size(), int(m.get("cols", 0)), int(m.get("rows", 0))])
 
 
-## Somewhere that is not a place: an animated nebula sky plus a synthesised
-## drone. Both procedural, because the brief asked for MOTION and ambience and
-## a static CC0 cubemap can give neither (and the good CC0 drones turned out to
-## be CC-BY or login-gated).
+## The room behind the glass — see backdrop.gd for the presets. The ambience is
+## still synthesised here; it never loops and carries no licence.
 func _build_backdrop() -> void:
-	var sky := Sky.new()
-	sky_mat = ShaderMaterial.new()
-	sky_mat.shader = load("res://shaders/nebula_sky.gdshader")
-	sky.sky_material = sky_mat
-	# Radiance costs real time on mobile and a background this dim lights nothing.
-	sky.radiance_size = Sky.RADIANCE_SIZE_32
-	sky.process_mode = Sky.PROCESS_MODE_INCREMENTAL
-
-	var env := Environment.new()
-	env.background_mode = Environment.BG_SKY
-	env.sky = sky
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	env.ambient_light_energy = 0.35
-	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-	env.glow_enabled = false          # ⚠️ glow is expensive on Quest and blooms text
-
-	world_env = WorldEnvironment.new()
-	world_env.environment = env
-	add_child(world_env)
-
+	backdrop = Backdrop.new()
+	add_child(backdrop)
 	ambience = Ambience.new()
 	add_child(ambience)
 
 
 func _apply_backdrop_config(cfg: Dictionary) -> void:
-	var bd: Dictionary = cfg.get("backdrop", {})
-	var mode := str(bd.get("mode", "default"))
-	# ⚠️ WorldEnvironment is a plain Node, not a VisualInstance3D — it has no
-	# `visible`. Switch the background mode instead.
-	if world_env and world_env.environment:
-		var e := world_env.environment
-		if mode == "passthrough":
-			e.background_mode = Environment.BG_CLEAR_COLOR
-			e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-		else:
-			e.background_mode = Environment.BG_SKY
-			e.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	var dim := float(bd.get("default", {}).get("dim", 0.0))
-	if sky_mat:
-		sky_mat.set_shader_parameter("nebula_strength", 0.55 * (1.0 - dim))
-		sky_mat.set_shader_parameter("star_brightness", 1.0 - dim * 0.7)
+	if backdrop:
+		backdrop.apply(cfg.get("backdrop", {}))
 	var amb: Dictionary = cfg.get("ambience", {})
 	if ambience:
 		ambience.master = float(amb.get("volume", 0.18))
 		ambience.set_enabled(bool(amb.get("enabled", true)))
+	# "none" = no motion; anything else breathes. Reduced-motion users set none.
+	var ni: Dictionary = cfg.get("glow", {}).get("states", {}).get("needs_input", {})
+	pulse_enabled = str(ni.get("pulse", "breathe")) != "none"
 
 
 func _read_token() -> String:
@@ -218,22 +207,13 @@ func px_for_dmm(v: float, dist_m: float, panel_w_m: float, vp_px: int) -> int:
 
 
 func _build_panel() -> void:
-	var cell := Vector2i(16, 40)
+	var cell := GlassUI.CELL
 	var vp_w := cols * cell.x
-	# ⚠️ One extra row for the STATUS STRIP. The status label used to be drawn at
-	# (4, 0) directly over the terminal's first line, hiding real output — caught
-	# by looking at a rendered frame, which is exactly why the preview exists.
-	var vp_h := (rows + 1) * cell.y
-
-	# dmm is the FONT size, not the cell advance: 22.3 dmm <-> 32 px. So the
-	# panel's angular width is vp_w * (dmm / font_px) milliradians, and the
-	# physical width follows from the distance.
-	# ⚠️ Dividing by cell.x instead of font_px makes every panel exactly 2x too
-	# big (2.68 m instead of 1.44 m) — caught only because this prints.
-	var font_px := 32.0
-	var ang_rad := (dmm / font_px) * float(vp_w) / 1000.0
-	var panel_w := 2.0 * distance * tan(ang_rad * 0.5)
-	var panel_h := panel_w * float(vp_h) / float(vp_w)
+	var vp_h := rows * cell.y
+	# ⚠️ The status text used to live on an extra row INSIDE the terminal layer.
+	# AS-0001 moved it onto the frame's own title strip, so the layer is now
+	# exactly the grid and nothing else.
+	var term := GlassUI.term_size(cols, rows, dmm, distance)
 
 	viewport = SubViewport.new()
 	viewport.size = Vector2i(vp_w, vp_h)
@@ -242,28 +222,85 @@ func _build_panel() -> void:
 	add_child(viewport)
 
 	grid = CellGrid.new()
-	grid.configure(cols, rows, font, 32, cell)
-	grid.position = Vector2(0, cell.y)
+	grid.configure(cols, rows, font, GlassUI.FONT_PX, cell)
+	# Same body colour as the frame, so layer and frame read as one slab.
+	grid.bg_default = GlassUI.BODY
 	viewport.add_child(grid)
 
-	status = Label.new()
-	status.add_theme_font_override("font", font)
-	status.add_theme_font_size_override("font_size", 22)
-	status.add_theme_color_override("font_color", Color(1.0, 0.72, 0.29))
-	status.position = Vector2(6, 2)
-	viewport.add_child(status)
+	# Aim the whole window once, then place frame and layer in its local space.
+	focus_group = GlassUI.oriented_group(rig,
+			GlassUI.polar(GlassUI.FOCUS_YAW_DEG, pitch_deg, distance))
+
+	# The frame grows upward around the grid to make room for its title strip.
+	var pad := GlassUI.FRAME_PAD_M
+	var title_h := GlassUI.FRAME_TITLE_M
+	var outer := Vector2(term.x + pad * 2.0, term.y + pad * 2.0 + title_h)
+	# ⚠️ Match the GRID's pixels-per-metre, or the same font size comes out ~3x
+	# larger on the strip and clips off the top of it.
+	var px_per_m := float(vp_h) / term.y
+	var oh := outer.y * px_per_m
+	frame_vp = GlassUI.content_viewport(self,
+			Vector2i(int(round(outer.x * px_per_m)), int(round(oh))), true)
+	var strip_px := title_h / outer.y * oh
+	var title_px := 40          # ~30 dmm: a touch larger than the 22.3 dmm body
+	title_left = GlassUI.baseline_label(frame_vp, font, session, title_px,
+			GlassUI.TEXT_PRIMARY, pad * px_per_m + 6.0, strip_px * 0.70)
+	title_right = GlassUI.baseline_label(frame_vp, font, "", title_px,
+			GlassUI.AMBER, 0.0, strip_px * 0.70)
+	var params := GlassUI.FRAME_TOKENS.duplicate()
+	params["attention"] = 0.0
+	params["content"] = frame_vp.get_texture()
+	GlassUI.glass(focus_group, outer, Vector3(0, title_h * 0.5, -0.004), params)
 
 	# ⚠️ Quad, not cylinder: the cylinder layer did not follow the rig between
 	# rooms on 2026-09-15 and that is still unexplained. Quad is proven.
 	layer = OpenXRCompositionLayerQuad.new()
 	layer.layer_viewport = viewport
-	layer.quad_size = Vector2(panel_w, panel_h)
+	layer.quad_size = term
 	layer.sort_order = 1
-	layer.position = Vector3(0, 0, -distance)
-	rig.add_child(layer)
+	focus_group.add_child(layer)
+	_update_status()
 
-	print("[term] %dx%d cells, viewport %dx%d, panel %.2fm x %.2fm at %.1fm = %.1f deg wide (%.1f dmm)"
-			% [cols, rows, vp_w, vp_h, panel_w, panel_h, distance, rad_to_deg(ang_rad), dmm])
+	var ang_rad := (dmm / float(GlassUI.FONT_PX)) * float(vp_w) / 1000.0
+	print("[term] %dx%d cells, viewport %dx%d, panel %.2fm x %.2fm at %.1fm = %.1f deg wide (%.1f dmm), yaw %.0f pitch %.0f"
+			% [cols, rows, vp_w, vp_h, term.x, term.y, distance, rad_to_deg(ang_rad), dmm,
+			   GlassUI.FOCUS_YAW_DEG, pitch_deg])
+
+
+## The cards: every session that is not on the focus panel, in the host's stable
+## order, slot 0 reserved for whoever the host says has waited longest.
+func _rebuild_rail() -> void:
+	if rail_root == null:
+		return
+	for c in rail_root.get_children():
+		c.queue_free()
+	waiting_cards.clear()
+	var slots := GlassUI.rail_slots(known, session, focus_key)
+	var size := GlassUI.angular_size(GlassUI.CARD_W_DEG, GlassUI.CARD_H_DEG, GlassUI.RAIL_DIST)
+	for i in range(slots.size()):
+		var slot: Dictionary = slots[i]
+		var pos := GlassUI.polar(GlassUI.RAIL_YAW_DEG, float(GlassUI.RAIL_ELEV_DEG[i]),
+				GlassUI.RAIL_DIST)
+		if slot.has("overflow"):
+			GlassUI.card(rail_root, font, pos, size, "+%d more" % int(slot["overflow"]), "", 0.0)
+			continue
+		var c := GlassUI.card(rail_root, font, pos, size, str(slot["key"]),
+				str(slot["state"]), float(slot["attention"]))
+		if float(slot["attention"]) > 0.5:
+			waiting_cards.append((c["mesh"] as MeshInstance3D).material_override)
+
+
+## Attention motion: the amber edge breathes on cards that are waiting on you.
+## Never to zero, never on cards that are not, and off entirely when the config
+## says `pulse = "none"`.
+func _process(delta: float) -> void:
+	if waiting_cards.is_empty():
+		return
+	_t += delta
+	var g := GlassUI.pulse_gain(_t) if pulse_enabled else GlassUI.PULSE_GAIN_HI
+	for m in waiting_cards:
+		if m:
+			m.set_shader_parameter("gain_attention", g)
 
 
 func _apply_config(cfg: Dictionary) -> void:
@@ -273,19 +310,22 @@ func _apply_config(cfg: Dictionary) -> void:
 	var new_cols := int(p.get("cols", cols))
 	var new_rows := int(p.get("rows", rows))
 	var new_dist := float(p.get("distance_m", distance))
+	var new_pitch := float(p.get("pitch_deg", pitch_deg))
 	_apply_backdrop_config(cfg)
 	if is_equal_approx(new_dmm, dmm) and new_cols == cols and new_rows == rows \
-			and is_equal_approx(new_dist, distance):
+			and is_equal_approx(new_dist, distance) and is_equal_approx(new_pitch, pitch_deg):
 		return
-	_apply_backdrop_config(cfg)
 	dmm = new_dmm
 	cols = new_cols
 	rows = new_rows
 	distance = new_dist
+	pitch_deg = new_pitch
 	# Rebuild: cheap, and far simpler than mutating live geometry.
-	if layer: layer.queue_free()
+	if focus_group: focus_group.queue_free()
 	if viewport: viewport.queue_free()
+	if frame_vp: frame_vp.queue_free()
 	_build_panel()
+	_rebuild_rail()
 	client.resync(session)
 	print("[term] config reload -> %d cols, %.1f dmm, %.2f m" % [cols, dmm, distance])
 
@@ -300,6 +340,8 @@ func recenter() -> void:
 		fwd = Vector3(0, 0, -1)
 	fwd = fwd.normalized()
 	rig.transform = Transform3D(Basis.looking_at(fwd, Vector3.UP), t.origin)
+	if backdrop:
+		backdrop.anchor(rig.transform)
 
 
 var _auto_tries := 0
@@ -353,6 +395,7 @@ func _on_sessions(list: Array) -> void:
 	known = known.filter(func(x): return str(x.get("state", "")) != "gone")
 	known.sort_custom(func(a, b): return str(a.get("key", "")) < str(b.get("key", "")))
 	_update_status()
+	_rebuild_rail()
 
 
 func _index_of(key: String) -> int:
@@ -371,10 +414,20 @@ func waiting_count() -> int:
 
 
 func _update_status() -> void:
-	if status == null:
+	if title_left == null or frame_vp == null:
 		return
+	title_left.text = link_text if link_text != "" else session
 	var n := waiting_count()
-	status.text = session + ("   %d waiting" % n if n > 0 else "")
+	var right := ("%d waiting" % n) if n > 0 else ""
+	title_right.text = right
+	# ⚠️ Measure the string; a guessed fraction of the width runs off the frame.
+	var title_px := 40
+	var w := font.get_string_size(right, HORIZONTAL_ALIGNMENT_LEFT, -1, title_px).x
+	var pad_px := float(frame_vp.size.y) / (GlassUI.term_size(cols, rows, dmm, distance).y \
+			+ GlassUI.FRAME_PAD_M * 2.0 + GlassUI.FRAME_TITLE_M) * GlassUI.FRAME_PAD_M
+	title_right.position.x = float(frame_vp.size.x) - w - pad_px - 6.0
+	# The strip only re-renders when its text changes.
+	frame_vp.render_target_update_mode = SubViewport.UPDATE_ONCE
 
 
 ## Show a different session on the focus panel.
@@ -387,6 +440,7 @@ func switch_to(key: String) -> void:
 		grid.clear()                     # never show the old session's text
 	client.subscribe(session, cols, rows)
 	_update_status()
+	_rebuild_rail()
 	print("[term] switched to %s" % session)
 
 

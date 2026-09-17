@@ -35,9 +35,13 @@ return {
     mode = "default",
 
     default = {
-      preset = "nebula",      -- "nebula" = the procedural animated sky (drifting
-                              -- clouds + twinkling stars). Not a real place, on
-                              -- purpose. "void" = flat dark.
+      preset = "cafe",        -- "cafe"   = a cartoon coffee shop with other people
+                              --            quietly working (baked, lightly animated).
+                              --            The social pressure of a café, none of
+                              --            the commute.
+                              -- "nebula" = the procedural animated sky that shipped
+                              --            first. Not a real place, on purpose.
+                              -- "void"   = flat dark.
       lighting = "baked",     -- "baked" is much cheaper on a Quest; "realtime" if you must
       dim = 0.0,              -- 0..1, darken the backdrop to make the glass pop
     },
@@ -148,7 +152,9 @@ return {
     states = {
       idle        = { edge = xr.hex("#ffffff"), intensity = 0.12 },
       working     = { edge = xr.hex("#4c8dff"), intensity = 0.22, pulse = "breathe" },
-      needs_input = { edge = xr.hex("#ffb74a"), intensity = 1.00, pulse = "none", spill = true },
+      -- "breathe": the amber edge slowly swells and settles (0.5 Hz, never dark).
+      -- Set "none" if motion in your periphery bothers you.
+      needs_input = { edge = xr.hex("#ffb74a"), intensity = 1.00, pulse = "breathe", spill = true },
       error       = { edge = xr.hex("#ff5c5c"), intensity = 0.95, pulse = "none", spill = true },
       done        = { edge = xr.hex("#5ad19b"), intensity = 0.55 },
     },

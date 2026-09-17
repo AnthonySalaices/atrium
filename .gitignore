@@ -43,3 +43,8 @@
 /logs/
 __pycache__/
 *.pyc
+
+# Internal: Astra briefs (owner voice, LAN links) and deliveries stay on the box.
+/astra/
+/inbox/*
+!/inbox/.gitkeep

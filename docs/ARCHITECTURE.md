@@ -153,6 +153,43 @@ the panel inside it stop nesting. Aim the group once, then offset children in it
 viewport independently of the grid gave it three times fewer pixels per metre, so the same font
 size came out three times larger and clipped.
 
+⭐ **One implementation of the look, shared by the client and the preview** (`glass_ui.gd`).
+The constants, the card construction, the rail-slot planner and the attention pulse live there,
+so the flat preview cannot drift from what ships, and a number tuned in the headset changes the
+preview too. Scene scripts reference the constants; they do not copy them.
+
+**The hybrid works by depth-ignorance, not depth.** Terminal text is a composition layer, which
+composites over the whole scene and never depth-sorts. So the glass frame — in-scene geometry
+carrying the title strip in its texture — simply sits a few millimetres behind the layer, inside
+an oriented group, and the layer covers the middle of it. Nothing has to be sorted.
+
+**Static surfaces render once.** Card and title-strip viewports use `UPDATE_ONCE` and are
+re-armed only when their text changes. On a standalone headset the difference between four idle
+viewports and four hot ones is real frame time.
+
+## The room behind the glass
+
+The backdrop is a setting, never an architecture choice: passthrough, a shipped preset, or (soon)
+the user's own `.glb`. The shipped room is a cartoon coffee shop with other people quietly
+working — the social pressure of a café without the commute — built to a strict standalone
+budget: unlit materials with baked vertex-colour lighting, one material, no textures, about 100k
+triangles, ten slow animation loops with unrelated periods so the room never visibly syncs.
+
+- ⚠️ **A glTF with N animations imports as ONE `AnimationPlayer`, and a player plays one
+  animation at a time.** Left alone, the fan spins and nothing else moves. Each additional
+  animation gets its own player pointed at the same root node, and loop mode is forced in code
+  rather than trusted to a naming suffix.
+- ⚠️ **The room must be anchored to the user, with its floor kept at zero.** Panels follow the
+  rig (head position + yaw after a recentre); if the room stayed at the play-space origin, the
+  seat would be wherever the guardian happened to start. The room takes the rig's x/z and yaw
+  with `y = 0`, so a recentre carries the café with the panels.
+- ⚠️ **Keep-out geometry is a brief constraint, not a runtime check.** Because layers ignore
+  depth, anything between the eye and a panel is a stereo conflict. The room was built with a
+  clear wedge in front and to the left of the seat, and only the user's own table (below 0.75 m,
+  within 0.55 m) inside it.
+- A `dim` setting darkens a GLB room through the environment's brightness adjustment; it also
+  touches the in-scene glass frames slightly, never the text on the layer.
+
 ## Surprises, each one paid for
 
 ### tmux types unknown key names instead of rejecting them
@@ -282,6 +319,13 @@ python3 tools/keys-smoke.py             # drives the real WebSocket: subscribe, 
                                         # confirm a bad key name is refused, confirm
                                         # the window geometry is restored
 ```
+
+The flat preview (`preview.gd`, `--shot out.png [--backdrop cafe|nebula|void]`) renders the exact
+client layout on any machine with a GPU in about 90 seconds. It is a stand-in for layout, colour,
+glow and spacing, never for sharpness — composition layers draw nothing outside an XR session.
+⚠️ **A new `class_name` needs an import pass** (`godot --headless --path godot --import`) on a
+machine that only pulls the tree; otherwise the global class cache is stale and every script that
+references the class fails to parse, which looks like a broken port rather than a stale cache.
 
 What genuinely requires the device: sharpness, comfort, layout at distance, latency as felt, and
 anything involving the compositor. Everything else has a way to be checked on the host — and a
