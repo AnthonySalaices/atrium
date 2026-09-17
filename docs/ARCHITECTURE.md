@@ -231,6 +231,26 @@ triangles, ten slow animation loops with unrelated periods so the room never vis
 - A `dim` setting darkens a GLB room through the environment's brightness adjustment; it also
   touches the in-scene glass frames slightly, never the text on the layer.
 
+### The room's sound
+
+Also synthesised, and for the same reason the drone was: the good CC0 loops are login-gated, the
+best-sounding ones are CC-BY, and a sampled loop eventually reveals its seam. ⛔ **No audio assets
+ship with the app.** `ambience.gd` is a small software mixer feeding one `AudioStreamGenerator`:
+
+- **typing** — one short noise-plus-pitch burst per keystroke that actually reaches a pane,
+  with randomised length and pitch. Identical clicks are what makes a fake keyboard sound fake,
+  and a click for a key the host would refuse sounds like it typed when it did not.
+- **steam** — band-passed noise under a slow swell, a few seconds every minute or three, panned
+  off to one side. It is a barista across the room, not a hiss in your ear.
+- **music** — either a procedural C major pad whose partials use irrational period ratios (so it
+  never lines up again and has no loop point) or the user's own folder, shuffled a pass at a time
+  through a real decoder on a second player. ⚠️ That folder path is on the DEVICE running the
+  client, not on the host that evaluates the config.
+
+⚠️ **Low is what sounded wrong.** The first drone stacked bare fifths on a 55 Hz root and read
+as *"a scary hum"*; the pad now sits an octave up. `ambience.enabled` is **false** by default
+regardless — silence is the right default for something worn on the face.
+
 ## Surprises, each one paid for
 
 ### tmux types unknown key names instead of rejecting them

@@ -49,6 +49,7 @@ USER_CONFIG = os.path.join(
 )
 
 BACKDROP_MODES = ("passthrough", "default", "custom")
+MUSIC_MODES = ("procedural", "folder", "off")
 REFRESH_RATES = (72, 90, 120)
 
 # The legibility floor is a real limit, not a preference: below ~18 dmm text
@@ -194,6 +195,53 @@ def validate(cfg):
     if changed:
         note("comfort.foveation clamped to %d" % int(v))
     comfort["foveation"] = int(v)
+
+    # ── ambience ────────────────────────────────────────────────────
+    amb = cfg.setdefault("ambience", {})
+    v, changed = _clamp(amb.get("volume"), 0.0, 1.0, 0.10)
+    if changed:
+        note("ambience.volume clamped to %g" % v)
+    amb["volume"] = v
+
+    for layer, dflt in (("typing", 0.35), ("steam", 0.50), ("music", 0.50)):
+        block = amb.setdefault(layer, {})
+        if not isinstance(block, dict):
+            note("ambience.%s must be a table — ignored" % layer)
+            block = {}
+            amb[layer] = block
+        v, changed = _clamp(block.get("volume"), 0.0, 1.0, dflt)
+        if changed:
+            note("ambience.%s.volume clamped to %g" % (layer, v))
+        block["volume"] = v
+
+    steam = amb["steam"]
+    lo, _ = _clamp(steam.get("every_min_s"), 5.0, 1800.0, 60.0)
+    hi, _ = _clamp(steam.get("every_max_s"), 5.0, 1800.0, 180.0)
+    if lo > hi:
+        note("ambience.steam.every_min_s > every_max_s — swapped")
+        lo, hi = hi, lo
+    steam["every_min_s"], steam["every_max_s"] = lo, hi
+
+    lo, _ = _clamp(steam.get("length_min_s"), 0.5, 15.0, 2.0)
+    hi, _ = _clamp(steam.get("length_max_s"), 0.5, 15.0, 4.0)
+    if lo > hi:
+        note("ambience.steam.length_min_s > length_max_s — swapped")
+        lo, hi = hi, lo
+    steam["length_min_s"], steam["length_max_s"] = lo, hi
+
+    music = amb["music"]
+    if music.get("mode") not in MUSIC_MODES:
+        note("ambience.music.mode %r is not one of %s — using 'procedural'"
+             % (music.get("mode"), ", ".join(MUSIC_MODES)))
+        music["mode"] = "procedural"
+    # ⚠️ music.dir is a path on the DEVICE running the client, not on this host,
+    # so there is nothing here to check it against — only its type.
+    if not isinstance(music.get("dir"), str):
+        music["dir"] = ""
+    if music["mode"] == "folder" and not music["dir"]:
+        note("ambience.music.mode is 'folder' but ambience.music.dir is unset — "
+             "using 'procedural'")
+        music["mode"] = "procedural"
 
     # ── sessions ────────────────────────────────────────────────────────────
     sess = cfg.setdefault("sessions", {})

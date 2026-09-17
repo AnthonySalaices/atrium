@@ -93,6 +93,52 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(cfg["panels"]["tile"]["max"], 7)
         self.assertEqual(cfg["sessions"]["max_panels"], 8)
 
+    def test_ambience_defaults_are_silent_and_valid(self):
+        cfg, _ = config.evaluate("")
+        notes = config.validate(cfg)
+        amb = cfg["ambience"]
+        self.assertFalse(amb["enabled"])          # silence is the default, always
+        self.assertEqual(amb["music"]["mode"], "procedural")
+        self.assertEqual(notes, [])
+
+    def test_ambience_volumes_and_steam_window_are_clamped(self):
+        p = write(self.tmp, """return { ambience = {
+            volume = 4,
+            typing = { volume = -1 },
+            steam = { every_min_s = 900, every_max_s = 30, length_min_s = 90 },
+        } }""")
+        cfg, _ = config.evaluate(p)
+        config.validate(cfg)
+        amb = cfg["ambience"]
+        self.assertEqual(amb["volume"], 1.0)
+        self.assertEqual(amb["typing"]["volume"], 0.0)
+        # min > max is a swap, not a silent room or a hiss every 30 minutes.
+        self.assertLessEqual(amb["steam"]["every_min_s"], amb["steam"]["every_max_s"])
+        self.assertEqual(amb["steam"]["length_min_s"], 4.0)
+        self.assertEqual(amb["steam"]["length_max_s"], 15.0)
+
+    def test_ambience_music_mode_is_an_enum_and_folder_needs_a_dir(self):
+        p = write(self.tmp, 'return { ambience = { music = { mode = "jazz" } } }')
+        cfg, _ = config.evaluate(p)
+        notes = config.validate(cfg)
+        self.assertEqual(cfg["ambience"]["music"]["mode"], "procedural")
+        self.assertTrue(any("music.mode" in n for n in notes))
+
+        p = write(self.tmp, 'return { ambience = { music = { mode = "folder" } } }')
+        cfg, _ = config.evaluate(p)
+        notes = config.validate(cfg)
+        self.assertEqual(cfg["ambience"]["music"]["mode"], "procedural")
+        self.assertTrue(any("music.dir" in n for n in notes))
+
+    def test_ambience_music_dir_is_not_checked_against_this_host(self):
+        """The path belongs to the headset's filesystem, not the daemon's."""
+        p = write(self.tmp,
+                  'return { ambience = { music = { mode = "folder", dir = "/sdcard/Music" } } }')
+        cfg, _ = config.evaluate(p)
+        config.validate(cfg)
+        self.assertEqual(cfg["ambience"]["music"]["mode"], "folder")
+        self.assertEqual(cfg["ambience"]["music"]["dir"], "/sdcard/Music")
+
     def test_empty_config_keeps_all_defaults(self):
         """A config with everything commented out must not wipe the defaults."""
         p = write(self.tmp, "return {}")

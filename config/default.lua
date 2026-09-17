@@ -127,12 +127,45 @@ return {
   -- AMBIENCE — the room tone.
   ----------------------------------------------------------------------------
   ambience = {
-    -- OFF by default. The synthesised drone that shipped with the nebula reads
-    -- as "a scary hum" in the café (first listener, 9/17). Café sound — typing,
-    -- a distant steam wand, optional chill music from your own folder — is the
-    -- planned replacement; until then, silence.
+    -- OFF by default, and it stays that way: silence is the right default for
+    -- something you wear on your face. Turn it on and you get a coffee shop,
+    -- entirely synthesised — no audio files ship with the app.
     enabled = false,
-    volume = 0.10,       -- 0..1 when enabled. Room tone, not music.
+    volume = 0.10,       -- 0..1 master for every layer below. Room tone, not music.
+                         -- Deliberately low: at 0.10 a keystroke sits near -37 dBFS
+                         -- and the steam wand near -35. Try 0.3-0.5 if you want the
+                         -- room clearly present; the layer volumes balance under it.
+
+    -- A soft click for each keystroke you send to a pane. Pitch and length are
+    -- randomised per key; identical clicks are what makes a fake keyboard sound
+    -- fake. Keys the router refuses stay silent.
+    typing = {
+      enabled = true,
+      volume = 0.35,     -- relative to ambience.volume
+    },
+
+    -- A barista steaming milk somewhere across the room: a few seconds of
+    -- filtered noise, then a minute or three of nothing.
+    steam = {
+      enabled = true,
+      volume = 0.50,
+      every_min_s = 60,  -- clamped to 5..1800, and min <= max
+      every_max_s = 180,
+      length_min_s = 2,  -- clamped to 0.5..15
+      length_max_s = 4,
+    },
+
+    -- "procedural" = a slow C major pad that never loops (the old drone, moved
+    --   up an octave — the 55 Hz version read as "a scary hum")
+    -- "folder"     = your own .ogg/.mp3, shuffled, one pass at a time
+    -- "off"        = no music layer; typing and steam still work
+    -- ⚠️ `dir` is a path on the DEVICE running the client — the headset, e.g.
+    -- "/sdcard/Music" — not on the host that evaluates this file.
+    music = {
+      mode = "procedural",
+      dir = "",
+      volume = 0.50,
+    },
   },
 
   ----------------------------------------------------------------------------

@@ -250,8 +250,7 @@ func _apply_backdrop_config(cfg: Dictionary) -> void:
 		backdrop.apply(cfg.get("backdrop", {}))
 	var amb: Dictionary = cfg.get("ambience", {})
 	if ambience:
-		ambience.master = float(amb.get("volume", 0.18))
-		ambience.set_enabled(bool(amb.get("enabled", true)))
+		ambience.set_config(amb)
 	# "none" = no motion; anything else breathes. Reduced-motion users set none.
 	var ni: Dictionary = cfg.get("glow", {}).get("states", {}).get("needs_input", {})
 	pulse_enabled = str(ni.get("pulse", "breathe")) != "none"
@@ -606,5 +605,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if not k.echo and k.keycode == KEY_F1:
 		recenter()
 		return
-	if router != null:
-		router.feed(k)
+	if router != null and router.feed(k) and ambience != null:
+		# The click belongs to keys that actually reach a pane, so a chord the
+		# router refused stays silent instead of sounding like it typed.
+		ambience.click()
