@@ -108,7 +108,7 @@ header. Client → host operations:
 
 | op | meaning |
 |---|---|
-| `subscribe` | start streaming a session; optionally pin it to `cols` × `rows` (a session with `@glasshouse_pin off` or matching `sessions.pin_exclude` is never resized — the client gets a bottom-left crop instead, flagged `cropped: [cols, rows]`) |
+| `subscribe` | start streaming a session; optionally pin it to `cols` × `rows` (a session with `@glasshouse_pin off` or matching `sessions.pin_exclude` is never resized — the client gets a bottom-left crop instead, flagged `cropped: [cols, rows]` on every frame, which it shows in the title strip) |
 | `unsubscribe` | stop, and restore the window's previous geometry |
 | `resync` | ask for a full frame instead of a diff (after a local rebuild) |
 | `keys` | type — see below |
@@ -370,7 +370,7 @@ python3 tools/keys-smoke.py             # drives the real WebSocket: subscribe, 
                                         # the window geometry is restored
 ```
 
-The flat preview (`preview.gd`, `--shot out.png [--backdrop cafe|nebula|void]`) renders the exact
+The flat preview (`preview.gd`, `--shot out.png [--backdrop cafe|nebula|void] [--crop COLSxROWS]`) renders the exact
 client layout on any machine with a GPU in about 90 seconds. It is a stand-in for layout, colour,
 glow and spacing, never for sharpness — composition layers draw nothing outside an XR session.
 ⚠️ **A new `class_name` needs an import pass** (`godot --headless --path godot --import`) on a

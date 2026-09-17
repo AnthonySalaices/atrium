@@ -39,6 +39,13 @@ var title_left: Label
 var title_right: Label
 var link_text := ""              # non-empty while not connected
 
+# Sessions that opted out of pinning (`glasshouse pin off`) are never resized on
+# the host; we get the bottom-left crop of a desktop-sized pane instead, flagged
+# `cropped: [cols, rows]`. Say so in the strip — without it the missing right-hand
+# columns read as a rendering bug. Keyed by session: a late frame from the one we
+# just left must not relabel the one we are looking at.
+var _cropped := {}               # session key -> Vector2i(cols, rows) of the real pane
+
 # The rail of session cards to the left. Rebuilt whenever the session list
 # changes; cheap, and far simpler than diffing four quads.
 var rail_root: Node3D
@@ -197,6 +204,7 @@ func _hide_pairing() -> void:
 func _on_frame(m: Dictionary) -> void:
 	grid.apply_frame(m)
 	_frames += 1
+	_note_crop(str(m.get("key", session)), m.get("cropped", null))
 	if _key_sent_ms > 0:
 		# Keypress -> the first frame that changed because of it. This is the
 		# number that decides whether typing in here feels acceptable.
@@ -206,6 +214,26 @@ func _on_frame(m: Dictionary) -> void:
 		print("[term] frame #%d rev=%d base=%d lines=%d %dx%d"
 				% [_frames, int(m.get("rev", 0)), int(m.get("base", -1)),
 				   m.get("lines", []).size(), int(m.get("cols", 0)), int(m.get("rows", 0))])
+
+
+## Every frame of an opted-out session carries the flag, so its absence clears
+## the badge. ⚠️ Only touch the strip when the state actually changes: it is an
+## UPDATE_ONCE viewport and re-arming it 12x a second re-renders it 12x a second.
+func _note_crop(key: String, flag: Variant) -> void:
+	var had := _cropped.has(key)
+	var have := flag is Array and (flag as Array).size() >= 2
+	var now := Vector2i.ZERO
+	if have:
+		var a: Array = flag
+		now = Vector2i(int(a[0]), int(a[1]))
+	if had == have and (not have or _cropped[key] == now):
+		return
+	if have:
+		_cropped[key] = now
+	else:
+		_cropped.erase(key)
+	if key == session:
+		_update_status()
 
 
 ## The room behind the glass — see backdrop.gd for the presets. The ambience is
@@ -484,8 +512,8 @@ func _update_status() -> void:
 	if title_left == null or frame_vp == null:
 		return
 	title_left.text = link_text if link_text != "" else session
-	var n := waiting_count()
-	var right := ("%d waiting" % n) if n > 0 else ""
+	var crop: Vector2i = _cropped.get(session, Vector2i.ZERO)
+	var right := GlassUI.title_right_text(waiting_count(), crop)
 	title_right.text = right
 	# ⚠️ Measure the string; a guessed fraction of the width runs off the frame.
 	var title_px := 40

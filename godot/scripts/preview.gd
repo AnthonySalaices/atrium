@@ -3,6 +3,7 @@ extends Node3D
 ## Flat layout preview — renders the arrangement to a PNG and quits.
 ##
 ##     godot --path godot --resolution 1280x720 -- --shot out.png [--backdrop cafe|nebula|void]
+##                                                   [--crop COLSxROWS]
 ##
 ## The build host has no X server, so this is the only way to SEE a layout without
 ## putting the headset on: render it on a machine with a GPU and look at the file.
@@ -122,7 +123,13 @@ func _build_focus_panel(eye: Node3D) -> void:
 	var title_px := 40
 	GlassUI.baseline_label(title_vp, font, FAKE_CURRENT, title_px, GlassUI.TEXT_PRIMARY,
 			pad * px_per_m + 6.0, strip_px * 0.70)
-	var waiting_text := "1 waiting"
+	# `--crop 210x53` renders the badge an opted-out session gets, through the
+	# same builder the client uses — the widest the strip ever gets.
+	var crop := Vector2i.ZERO
+	var wh := _arg_value("--crop", "").split("x")
+	if wh.size() == 2:
+		crop = Vector2i(int(wh[0]), int(wh[1]))
+	var waiting_text := GlassUI.title_right_text(1, crop)
 	var waiting_w := font.get_string_size(waiting_text, HORIZONTAL_ALIGNMENT_LEFT, -1, title_px).x
 	GlassUI.baseline_label(title_vp, font, waiting_text, title_px, GlassUI.AMBER,
 			float(title_vp.size.x) - waiting_w - pad * px_per_m - 6.0, strip_px * 0.70)

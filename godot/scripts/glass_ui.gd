@@ -56,6 +56,18 @@ const PULSE_GAIN_HI := 1.10
 const WAITING_STATES := ["needs-input", "error", "done"]
 
 
+## The right-hand end of a title strip: who is waiting, and whether this pane is
+## only a crop of a bigger one (a session that opted out of pinning). Shared with
+## the preview so the two cannot drift apart on the widest string the strip holds.
+static func title_right_text(waiting: int, crop: Vector2i) -> String:
+	var parts: Array[String] = []
+	if waiting > 0:
+		parts.append("%d waiting" % waiting)
+	if crop.x > 0 and crop.y > 0:
+		parts.append("desktop %d×%d · crop" % [crop.x, crop.y])
+	return " · ".join(parts)
+
+
 ## dmm is the FONT size, so the angular width is cols * cell.x * (dmm / font_px)
 ## milliradians. ⚠️ Dividing by cell.x instead makes every panel exactly 2x too big.
 static func term_size(cols: int, rows: int, dmm: float, dist: float) -> Vector2:
