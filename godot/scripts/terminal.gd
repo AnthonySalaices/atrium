@@ -160,6 +160,15 @@ func _show_pairing() -> void:
 	pairing = Pairing.new()
 	pairing.font = font
 	rig.add_child(pairing)
+	# ⛔ The terminal is a composition layer and draws OVER scene geometry, so a
+	# card placed where the window is would be invisible behind the text. The
+	# window steps aside while pairing; it is modal anyway.
+	if focus_group:
+		focus_group.visible = false
+	if layer:
+		layer.visible = false
+	if rail_root:
+		rail_root.visible = false
 	pairing.paired.connect(func(h, p, t):
 		print("[pair] paired with %s:%d" % [h, p])
 		_hide_pairing()
@@ -177,6 +186,12 @@ func _hide_pairing() -> void:
 	if pairing:
 		pairing.queue_free()
 		pairing = null
+	if focus_group:
+		focus_group.visible = true
+	if layer:
+		layer.visible = true
+	if rail_root:
+		rail_root.visible = true
 
 
 func _on_frame(m: Dictionary) -> void:
@@ -531,7 +546,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	# ignored for them, but PASSED THROUGH for typing.
 	# ⚠️ Keychron V1 Max sends media keys on the F-row by default, so plain F1
 	# never arrives; ctrl+alt+R is the primary binding (and `keys.recenter`).
-	if not k.echo and k.ctrl_pressed and k.alt_pressed:
+	# ⚠️ A keyboard in Mac mode sends Option as Alt but many people reach for
+	# Command; accept either as the chord modifier.
+	if not k.echo and k.ctrl_pressed and (k.alt_pressed or k.meta_pressed):
 		# ⚠️ These are matched before the router runs, so a binding never also
 		# gets typed into the pane. They mirror `keys` in config/default.lua;
 		# ⏳ parsing those strings into keycodes is not done yet, so the defaults

@@ -53,19 +53,33 @@ func _init() -> void:
 	add_child(we)
 
 
+## The seated eye height the shipped room was built around (AS-0002 brief).
+const DESIGN_EYE_M := 1.20
+## How far the room may be shifted to fit a shorter or taller user.
+const SEAT_ADJUST_MAX_M := 0.35
+
 ## Put the room's seat under the user. `t` is the rig transform (head position
-## and yaw after a recentre); the room takes its x/z and yaw with its floor kept
-## at y = 0, so recentring carries the café with the panels instead of leaving
-## the seat wherever the play space happened to start.
+## and yaw after a recentre); the room takes its x/z and yaw, so recentring
+## carries the café with the panels instead of leaving the seat wherever the
+## play space happened to start.
+##
+## ⚠️ The room is also shifted vertically so ITS design eye height lands on the
+## user's ACTUAL eye height. The first wearer recentred at 1.08 m in a room built
+## for 1.20 m: the table rose 12 cm relative to him and the coffee cup crossed
+## the sight line to the panel's bottom edge — in front of the bezel (scene
+## geometry, depth-sorted) but behind the text (composition layer, always on
+## top). Matching eye heights keeps the keep-out wedge where Astra checked it.
 func anchor(t: Transform3D) -> void:
 	var fwd := -t.basis.z
 	fwd.y = 0.0
 	if fwd.length() < 0.001:
 		fwd = Vector3(0, 0, -1)
+	var dy := clampf(t.origin.y - DESIGN_EYE_M, -SEAT_ADJUST_MAX_M, SEAT_ADJUST_MAX_M)
 	_anchor = Transform3D(Basis.looking_at(fwd.normalized(), Vector3.UP),
-			Vector3(t.origin.x, 0.0, t.origin.z))
+			Vector3(t.origin.x, dy, t.origin.z))
 	if room:
 		room.transform = _anchor
+	print("[backdrop] anchored: eye %.2f m, room shifted %.2f m" % [t.origin.y, dy])
 
 
 ## Apply the `backdrop` table from the served config.
