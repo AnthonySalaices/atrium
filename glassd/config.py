@@ -17,7 +17,30 @@ import subprocess
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 LUA = os.path.join(ROOT, "vendor", "lua", "bin", "lua")
-CONFIG_DIR = os.path.join(ROOT, "config")
+# In a checkout the Lua files live in <repo>/config; in an installed wheel they
+# are packaged next to this module (pyproject force-includes them).
+CONFIG_DIR = os.path.join(HERE, "config") if os.path.isdir(os.path.join(HERE, "config")) \
+    else os.path.join(ROOT, "config")
+LUAEVAL = os.path.join(HERE, "luaeval.py")
+
+
+def _has_lupa():
+    try:
+        import lupa  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def evaluator():
+    """The command that evaluates config: the vendored binary when it was
+    built (a checkout), otherwise lupa (a pip install). Same script, same JSON."""
+    if os.path.exists(LUA):
+        return [LUA, EVAL]
+    if _has_lupa():
+        import sys
+        return [sys.executable, LUAEVAL]
+    return None
 EVAL = os.path.join(CONFIG_DIR, "eval.lua")
 
 USER_CONFIG = os.path.join(
@@ -53,13 +76,14 @@ def evaluate(user_path=None):
     """Run the Lua evaluator. Returns (config, warnings). Raises ConfigError."""
     if user_path is None:
         user_path = USER_CONFIG
-    if not os.path.exists(LUA):
-        raise ConfigError("lua not built — run tools/build-lua.sh")
+    cmd = evaluator()
+    if cmd is None:
+        raise ConfigError("no Lua evaluator: pip install lupa, or run tools/build-lua.sh")
 
     arg = user_path if (user_path and os.path.exists(user_path)) else ""
     try:
         p = subprocess.run(
-            [LUA, EVAL, CONFIG_DIR, arg],
+            cmd + [CONFIG_DIR, arg],
             capture_output=True, text=True, timeout=10,
         )
     except subprocess.TimeoutExpired:

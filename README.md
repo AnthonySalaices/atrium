@@ -62,34 +62,58 @@ saving `config.lua` restyles the live panel with no rebuild and no reinstall.
 ## Requirements
 
 - A Meta Quest 3 (others untested), developer mode on
-- A Linux host running `tmux` and Python 3.11+, reachable from the headset
-- For building the APK: ~4 GB of disk. No root, no GUI, no Android Studio.
+- A Linux host running `tmux` 3.2+ and Python 3.9+, reachable from the headset
+- For building the APK yourself: ~4 GB of disk. No root, no GUI, no Android Studio.
 
-## Build and run
+## Install the host side
+
+```bash
+pipx install git+https://github.com/AnthonySalaices/glasshouse   # or: pip install .
+glasshouse init
+```
+
+`init` checks tmux and Python, finds the agent harnesses on your PATH (Claude Code, Codex,
+Gemini CLI, aider, OpenCode, …), offers to install each one's hooks so the glow is exact, writes
+`~/.config/glasshouse/config.lua` and a token, starts the daemon on your LAN, can register it to
+start at login (no sudo), and prints a pairing card. Re-running it skips whatever is done;
+`--dry-run` only shows the plan.
+
+Then, in the headset, open Glasshouse and type the code from the card. That is the whole
+pairing: the APK carries no host and no secret. `glasshouse pair` prints a fresh code any time;
+ctrl+alt+P in the headset opens the card again.
+
+```bash
+glasshouse start claude-code ~/my-project   # an agent in a named tmux session (any harness)
+glasshouse config                           # your config.lua, restyles the headset live on save
+glasshouse doctor                           # what is installed, hooked and reachable
+glasshouse notify auto needs-input          # tell the daemon yourself, from any hook or script
+```
+
+Config is evaluated by `lupa` (Lua 5.4 in a wheel) so nothing needs compiling. A checkout that
+has run `tools/build-lua.sh` uses the vendored interpreter instead; the output is identical.
+
+## Build the headset app
 
 ```bash
 # 1. Toolchain: Godot 4.7.2 + Android SDK/NDK + the OpenXR vendors plugin.
 #    ~3.2 GB, resumable, everything under $HOME. No sudo.
 tools/bootstrap-toolchain.sh
 
-# 2. Tell the APK where your host is (this file is gitignored on purpose).
-cp godot/data/host.txt.example godot/data/host.txt && $EDITOR godot/data/host.txt
-
-# 3. Start the daemon. It writes a 32-hex token to ~/.config/glasshouse/token
-#    on first run and refuses every request without it.
-./start.sh --lan          # plain ./start.sh is loopback-only
-
-# 4. Copy that token where the build can see it, then build and install.
-cp ~/.config/glasshouse/token godot/data/token.txt
+# 2. Build and install. The APK pairs with the host on first run, so it needs
+#    nothing baked in. (A dev build may still drop a host.txt/token.txt into
+#    godot/data/ to skip pairing — see the .example files.)
 tools/build-apk.sh
 tools/deploy-quest.sh
 ```
+
+From a checkout the daemon can also be run with `./start.sh --lan` (`./start.sh` alone binds
+loopback, which the headset cannot reach).
 
 Check it without a headset at all:
 
 ```bash
 curl -s "localhost:7570/screen/<session>.txt?token=$(cat ~/.config/glasshouse/token)"
-python3 -m unittest discover -s tests     # 52 tests
+python3 -m unittest discover -s tests     # 105 tests
 python3 tools/keys-smoke.py               # typing, end to end, no headset
 ```
 

@@ -48,3 +48,8 @@ __pycache__/
 /astra/
 /inbox/*
 !/inbox/.gitkeep
+
+# Python packaging
+/dist/
+/build/
+*.egg-info/

@@ -135,3 +135,35 @@ class TestConfig(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LupaParity(unittest.TestCase):
+    """The lupa evaluator must print exactly what the vendored binary prints."""
+
+    def _both(self, user):
+        import subprocess, sys
+        binary = os.path.join(config.ROOT, "vendor", "lua", "bin", "lua")
+        if not os.path.exists(binary):
+            self.skipTest("lua binary not built")
+        try:
+            import lupa  # noqa: F401
+        except ImportError:
+            self.skipTest("lupa not installed")
+        a = subprocess.run([binary, config.EVAL, config.CONFIG_DIR, user],
+                           capture_output=True, text=True, timeout=10).stdout
+        b = subprocess.run([sys.executable, config.LUAEVAL, config.CONFIG_DIR, user],
+                           capture_output=True, text=True, timeout=10).stdout
+        return a, b
+
+    def test_defaults_identical(self):
+        a, b = self._both("")
+        self.assertEqual(a, b)
+
+    def test_broken_config_identical(self):
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".lua", delete=False) as f:
+            f.write("return {")
+        a, b = self._both(f.name)
+        os.unlink(f.name)
+        self.assertEqual(a, b)
+        self.assertIn('"ok":false', a)
