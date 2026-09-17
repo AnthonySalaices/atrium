@@ -89,6 +89,18 @@ becomes `bash` or `python3` the moment an agent runs a tool, and Node- or Python
 show up as `node` or `python3` with the real name only in their arguments. Session-name
 patterns are an optional filter, never the discovery mechanism.
 
+## Pairing
+
+The APK carries no host and no secret. On the host, `glasshouse pair` asks the daemon (over the
+authenticated API) for a **6-digit code, valid ten minutes, single use**, and prints it with the
+LAN address. In the headset, the first-run card broadcasts a UDP discovery ping — every daemon
+on the network answers with its hostname, no secrets either way — and the user picks a host and
+types the code. `POST /pair {code}` is the one unauthenticated route; it returns the long-lived
+token, which the client stores in `user://`. Five wrong guesses retire the code and lock pairing
+for five minutes, so a million-code space cannot be walked. ctrl+alt+P opens the card again to
+re-pair. A dev build may still ship `res://data/host.txt` + `token.txt`; stored credentials win
+over them.
+
 ## Wire protocol
 
 One WebSocket, JSON frames both ways, token in the query string or an `Authorization: Bearer`

@@ -29,6 +29,9 @@ import pin as _pin
 import keys as _keys
 import focus as _focus
 import agents as _agents
+import pairing as _pairing
+
+_pair = _pairing.Pairing()
 
 TOKEN_PATH = os.path.join(
     os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")),
@@ -318,8 +321,15 @@ def udp_loop():
     s.bind((BIND, PORT))
     while True:
         try:
-            data, _ = s.recvfrom(65535)
-            handle_event(json.loads(data.decode("utf-8", "replace")))
+            data, addr = s.recvfrom(65535)
+            ev = json.loads(data.decode("utf-8", "replace"))
+            if isinstance(ev, dict) and ev.get("glasshouse") == "discover":
+                # First-run discovery: a headset broadcasts, every daemon on the
+                # LAN answers with its name. No secrets in either direction.
+                s.sendto(json.dumps({"glasshouse": "here", "name": socket.gethostname(),
+                                     "port": PORT, "proto": PROTO}).encode(), addr)
+                continue
+            handle_event(ev)
         except Exception:
             pass
 
@@ -374,14 +384,49 @@ def serve_conn(conn):
             if not chunk: return
             req += chunk
             if len(req) > 65536: return
-        head = req.split(b"\r\n\r\n", 1)[0].decode("latin1")
+        head, body_bytes = req.split(b"\r\n\r\n", 1)
+        head = head.decode("latin1")
         lines = head.split("\r\n")
-        path = lines[0].split(" ")[1] if " " in lines[0] else "/"
+        parts0 = lines[0].split(" ")
+        method = parts0[0].upper() if parts0 else "GET"
+        path = parts0[1] if len(parts0) > 1 else "/"
         hdrs = {}
         for l in lines[1:]:
             if ":" in l:
                 k, v = l.split(":", 1)
                 hdrs[k.strip().lower()] = v.strip()
+
+        def reply(status, obj):
+            body = json.dumps(obj).encode()
+            conn.sendall(("HTTP/1.1 %s\r\nContent-Type: application/json\r\n"
+                          "Access-Control-Allow-Origin: *\r\n"
+                          "Content-Length: %d\r\n\r\n" % (status, len(body))).encode() + body)
+
+        def read_body():
+            n = int(hdrs.get("content-length", "0") or 0)
+            n = min(n, 4096)
+            b = body_bytes
+            while len(b) < n:
+                chunk = conn.recv(4096)
+                if not chunk: break
+                b += chunk
+            try:
+                return json.loads(b[:n].decode("utf-8", "replace") or "{}")
+            except Exception:
+                return {}
+
+        # ── pairing ──────────────────────────────────────────────────────
+        # /pair is the ONE unauthenticated route: a 6-digit single-use code
+        # (issued by `glasshouse pair`, which IS authenticated) buys the token.
+        # Brute force is handled in pairing.py (5 tries, then a 5-minute lock).
+        if path.split("?")[0] == "/pair" and method == "POST":
+            ok, why = _pair.redeem(str(read_body().get("code", "")))
+            if ok:
+                reply("200 OK", {"token": TOKEN or "", "port": PORT, "proto": PROTO})
+            else:
+                reply("429 Too Many Requests" if why == "locked" else "400 Bad Request",
+                      {"error": why})
+            return
 
         # ⛔ Everything here exposes terminal contents. No token, no data.
         if not authed(path, hdrs):
@@ -410,6 +455,11 @@ def serve_conn(conn):
             except Exception: pass
             _clients.append(c)
             ws_reader(c)
+            return
+
+        if path.split("?")[0] == "/pair/new" and method == "POST":
+            code, ttl = _pair.new_code()
+            reply("200 OK", {"code": code, "ttl": ttl, "bind": BIND, "port": PORT})
             return
 
         if path.startswith("/events"):

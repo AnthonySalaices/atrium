@@ -43,6 +43,11 @@ var link_text := ""              # non-empty while not connected
 # changes; cheap, and far simpler than diffing four quads.
 var rail_root: Node3D
 var waiting_cards: Array = []    # ShaderMaterials whose edge breathes
+
+# First-run pairing. The APK ships no host and no token; they come from the
+# pairing card (stored in user://) or, for a dev build, from res://data/*.txt.
+var pairing: Pairing
+var linked := false
 var pulse_enabled := true
 var _t := 0.0
 
@@ -91,8 +96,6 @@ func _ready() -> void:
 	rig.add_child(rail_root)
 
 	client = GlassClient.new()
-	client.host = _read_data_file("host.txt", HOST_FALLBACK)
-	client.token = _read_token()
 	add_child(client)
 	client.screen_frame.connect(_on_frame)
 	client.config_changed.connect(_apply_config)
@@ -108,10 +111,20 @@ func _ready() -> void:
 		if k != focus_key:
 			focus_key = k
 			_rebuild_rail())
-	client.start()
 	session = _read_data_file("session.txt", SESSION_FALLBACK)
-	client.subscribe(session, cols, rows)
-	_update_status()
+
+	# Where do we connect? user:// (paired) beats res://data (dev build) beats
+	# nothing (show the pairing card).
+	var saved := Pairing.load_saved()
+	if saved.is_empty():
+		var h := _read_data_file("host.txt", "")
+		var t := _read_token()
+		if h != "" and t != "":
+			saved = {"host": h, "port": 7570, "token": t}
+	if saved.is_empty():
+		_show_pairing()
+	else:
+		_link(str(saved["host"]), int(saved.get("port", 7570)), str(saved["token"]))
 
 	# M4: the panel is no longer read-only.
 	router = InputRouter.new()
@@ -125,6 +138,45 @@ func _ready() -> void:
 
 
 var _frames := 0
+
+
+## Connect with known credentials.
+func _link(h: String, p: int, t: String) -> void:
+	client.host = h
+	client.port = p
+	client.token = t
+	if not linked:
+		client.start()
+		linked = true
+	else:
+		client.reconnect()
+	client.subscribe(session, cols, rows)
+	_update_status()
+
+
+func _show_pairing() -> void:
+	if pairing != null:
+		return
+	pairing = Pairing.new()
+	pairing.font = font
+	rig.add_child(pairing)
+	pairing.paired.connect(func(h, p, t):
+		print("[pair] paired with %s:%d" % [h, p])
+		_hide_pairing()
+		_link(h, p, t))
+	pairing.cancelled.connect(func():
+		if linked:
+			_hide_pairing()
+		else:
+			print("[pair] nothing to cancel to — no host known yet"))
+	link_text = "not paired"
+	_update_status()
+
+
+func _hide_pairing() -> void:
+	if pairing:
+		pairing.queue_free()
+		pairing = null
 
 
 func _on_frame(m: Dictionary) -> void:
@@ -488,6 +540,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			KEY_R:
 				recenter()
 				return
+			KEY_P:
+				# Re-pair: a new host, a new code. Works with or without a link.
+				_show_pairing()
+				return
 			KEY_RIGHT:
 				cycle_session(+1)
 				return
@@ -497,6 +553,11 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			KEY_SPACE:
 				jump_to_glow()
 				return
+	# ⛔ While the pairing card is up, every key belongs to it. Nothing typed
+	# there may reach a tmux pane.
+	if pairing != null:
+		pairing.feed(k)
+		return
 	if not k.echo and k.keycode == KEY_F1:
 		recenter()
 		return

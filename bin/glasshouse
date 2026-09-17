@@ -10,6 +10,11 @@
         Tier-2 integration: install the harness's own hook entries so the glow is
         exact. Backs up, merges, re-parses, idempotent.
 
+    glasshouse pair
+        Print a one-time 6-digit code (valid 10 minutes) to type into the
+        headset's pairing card. The APK ships with no secret; this is how it
+        gets the token.
+
     glasshouse doctor
         What is installed, what is hooked, whether the daemon answers.
 
@@ -97,6 +102,97 @@ def cmd_hooks(a):
     return rc
 
 
+def _lan_addresses():
+    """Every non-loopback IPv4 this host has, best guess first."""
+    addrs = []
+    primary = None
+    try:
+        # The address the default route uses is almost always the LAN one.
+        out = subprocess.run(["ip", "-4", "route", "get", "1.1.1.1"], capture_output=True,
+                             text=True, timeout=3).stdout.split()
+        if "src" in out:
+            primary = out[out.index("src") + 1]
+    except Exception:
+        pass
+    try:
+        out = subprocess.run(["ip", "-4", "-o", "addr"], capture_output=True, text=True,
+                             timeout=3).stdout
+        for line in out.splitlines():
+            parts = line.split()
+            if "inet" not in parts or len(parts) < 2:
+                continue
+            iface = parts[1]
+            # Container bridges and tunnels are real addresses a headset can
+            # never use; on a box with a few Docker stacks they are dozens.
+            if iface.startswith(("docker", "br-", "veth", "virbr", "tailscale", "lo", "tun", "wg")):
+                continue
+            ip = parts[parts.index("inet") + 1].split("/")[0]
+            if not ip.startswith("127."):
+                addrs.append(ip)
+    except Exception:
+        pass
+    if primary:
+        addrs = [primary] + [a for a in addrs if a != primary]
+    if not addrs:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("10.255.255.255", 1))
+            addrs.append(s.getsockname()[0])
+        except Exception:
+            pass
+    # Tailscale-style 100.x addresses are real but rarely what a headset on the
+    # LAN wants; put private ranges first.
+    addrs.sort(key=lambda a: 0 if a.startswith(("192.168.", "10.", "172.")) else 1)
+    return addrs
+
+
+def _token():
+    p = os.path.expanduser(os.environ.get("GLASSHOUSE_TOKEN_FILE", "~/.config/glasshouse/token"))
+    try:
+        with open(p) as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def cmd_pair(a):
+    """Ask the daemon for a fresh pairing code and print the card."""
+    import http.client
+    tok = _token()
+    if not tok:
+        sys.exit("glasshouse pair: no token file yet — start the daemon once (./start.sh --lan)")
+    try:
+        c = http.client.HTTPConnection(HOST, PORT, timeout=3)
+        c.request("POST", "/pair/new", body="{}",
+                  headers={"Authorization": "Bearer " + tok, "Content-Type": "application/json"})
+        r = c.getresponse()
+        v = json.loads(r.read().decode() or "{}")
+    except Exception as e:
+        sys.exit("glasshouse pair: daemon not reachable on %s:%d (%s) — run ./start.sh --lan" % (HOST, PORT, e))
+    if r.status != 200 or "code" not in v:
+        sys.exit("glasshouse pair: daemon refused (%s %s)" % (r.status, v))
+    code = v["code"]
+    mins = int(v.get("ttl", 600)) // 60
+    addrs = _lan_addresses()
+    lan = v.get("bind") not in (None, "127.0.0.1", "localhost")
+    print()
+    print("  ┌──────────────────────────────────────────┐")
+    print("  │  Glasshouse pairing                       │")
+    print("  │                                          │")
+    print("  │  code   %s   %s                        │" % (code[:3], code[3:]))
+    print("  │  host   %-33s│" % ((addrs[0] + ":" + str(PORT)) if addrs else "(no LAN address found)"))
+    print("  │                                          │")
+    print("  │  Put the headset on, open Glasshouse and  │")
+    print("  │  enter the code. Valid %2d minutes, once.  │" % mins)
+    print("  └──────────────────────────────────────────┘")
+    if len(addrs) > 1:
+        print("  other addresses: " + ", ".join(addrs[1:]))
+    if not lan:
+        print("  ⚠️  the daemon is bound to loopback — the headset cannot reach it. Restart with ./start.sh --lan")
+    print()
+    return 0
+
+
 def cmd_doctor(a):
     print("harnesses on $PATH:")
     found = agents.installed()
@@ -136,6 +232,9 @@ def main(argv=None):
     h.add_argument("--dry-run", action="store_true")
     h.add_argument("--path", help="settings file to edit instead of the default")
     h.set_defaults(fn=cmd_hooks)
+
+    pr = sub.add_parser("pair", help="print a one-time pairing code for the headset")
+    pr.set_defaults(fn=cmd_pair)
 
     d = sub.add_parser("doctor", help="what is installed and reachable")
     d.set_defaults(fn=cmd_doctor)

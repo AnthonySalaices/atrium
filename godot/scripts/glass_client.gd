@@ -37,6 +37,16 @@ func start() -> void:
 	_connect()
 
 
+## Drop the current socket and connect again with the current host/token —
+## what a re-pair needs. Subscriptions are replayed on connect as usual.
+func reconnect() -> void:
+	connected = false
+	_ws.close()
+	_ws = WebSocketPeer.new()
+	_retry = 0.0
+	_connect()
+
+
 func _connect() -> void:
 	emit_signal("link_state", "connecting to %s:%d" % [host, port])
 	var err := _ws.connect_to_url(url())
