@@ -183,12 +183,40 @@ return {
   -- SESSIONS — which tmux sessions become panels.
   ----------------------------------------------------------------------------
   sessions = {
-    include = { "^cc", "^cx" },   -- Lua patterns; nil means everything
+    -- Glasshouse finds agents by what is RUNNING in a tmux pane (see `agents`
+    -- below), not by session name. These are optional extra filters on the
+    -- session name (regular expressions). Empty = no filter.
+    include = {},
     exclude = {},
     order = "activity",           -- "activity" | "name" | "fixed"
     fixed = {},                   -- session names, in the order you want them
     title = "pane",               -- "pane" uses the agent's own summary line
     max_panels = 8,
+  },
+
+  ----------------------------------------------------------------------------
+  -- AGENTS — which terminal programs count as an agent.
+  --
+  -- "Provider" is the wrong axis. Claude, GPT, DeepSeek, Qwen are models; what
+  -- runs in your terminal is a HARNESS (Claude Code, Codex CLI, Gemini CLI,
+  -- aider, OpenCode, …) and one harness can front several models. Glasshouse
+  -- recognises harnesses by the process in the pane and never needs an API key.
+  --
+  -- Built in: claude-code, codex, gemini-cli, qwen-code, opencode, aider, crush,
+  -- goose, amp, copilot, kiro, cursor-agent. Add or override here; the phrases
+  -- are matched against the last 12 lines of the pane to guess "needs you" /
+  -- "working" when the harness has no hooks. A wrong phrase costs a dim glow,
+  -- nothing more — the scraper can never type into a pane.
+  ----------------------------------------------------------------------------
+  agents = {
+    extra = {
+      -- mytool = {
+      --   name = "My Tool",
+      --   match = { "mytool" },              -- process / script names to look for
+      --   needs_input = { "Proceed? (y/n)" },
+      --   working = { "thinking" },
+      -- },
+    },
   },
 
   ----------------------------------------------------------------------------

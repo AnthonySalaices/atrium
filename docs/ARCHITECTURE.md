@@ -60,6 +60,28 @@ cards carrying a name and a state. Cards are not for reading prose — and the r
 purpose (four slots, then a single "+N more"), because the angular budget runs out long before
 the list does.
 
+## Which programs count as agents
+
+"Provider" is the wrong axis; "harness" is the right one. Claude, GPT, DeepSeek and Qwen are
+models; what sits in a tmux pane is a *harness* (Claude Code, Codex CLI, Gemini CLI, aider,
+OpenCode, …), and one harness can front several models. Glasshouse recognises harnesses by the
+process in the pane and never touches a model or an API key. Supporting a new provider is
+therefore a row in a table (`glassd/agents.py`, extendable from `agents.extra` in the config),
+not an integration.
+
+Three tiers of "the agent needs you":
+
+| tier | mechanism | quality |
+|---|---|---|
+| 3 universal | the pane's process tree contains a known harness; the last lines of the pane are scraped for that harness's prompt phrases | heuristic, rendered dimmer |
+| 2 hooks | the harness reports events (Claude Code hooks, Codex `notify`) through a fire-and-forget UDP shim | exact |
+| 1 user shim | anything calls `glasshouse notify` (planned) | exact |
+
+⚠️ **Recognition walks the process tree, not one field.** tmux's `pane_current_command`
+becomes `bash` or `python3` the moment an agent runs a tool, and Node- or Python-hosted CLIs
+show up as `node` or `python3` with the real name only in their arguments. Session-name
+patterns are an optional filter, never the discovery mechanism.
+
 ## Wire protocol
 
 One WebSocket, JSON frames both ways, token in the query string or an `Authorization: Bearer`

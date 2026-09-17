@@ -28,6 +28,7 @@ import screen as _screen
 import pin as _pin
 import keys as _keys
 import focus as _focus
+import agents as _agents
 
 TOKEN_PATH = os.path.join(
     os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")),
@@ -82,6 +83,14 @@ def cfgwatch():
     if _cfgwatch is None:
         _cfgwatch = _config.ConfigWatcher()
     return _cfgwatch
+
+
+def _current_config():
+    """The resolved config, or {} before the first successful load."""
+    try:
+        return cfgwatch().config or {}
+    except Exception:
+        return {}
 
 
 def screen_loop():
@@ -578,13 +587,9 @@ TMUX_FMT = ("#{session_name}\t#{pane_id}\t#{pane_current_command}\t#{pane_pid}\t
             "#{window_activity}\t#{pane_title}")
 
 
-def classify(pane_text, cmd):
-    tail = "\n".join(pane_text.splitlines()[-12:])
-    if "Do you want to" in tail or "Would you like to proceed" in tail:
-        return "needs-input", "prompt-scrape"
-    if "esc to interrupt" in tail:
-        return "working", "prompt-scrape"
-    return "idle", "prompt-scrape"
+# ⛔ Provider-agnostic on purpose: the harness table lives in glassd/agents.py
+# and the user can extend it from config.lua (`agents.extra`). Nothing about
+# Claude or Codex is special-cased here any more.
 
 
 def tmux_session_exists(name):
@@ -604,18 +609,25 @@ def poll_loop():
         try:
             out = subprocess.run(["tmux", "list-panes", "-a", "-F", TMUX_FMT],
                                  capture_output=True, text=True, timeout=5).stdout
+            cfg = _current_config()
+            table = _agents.table(cfg)
+            procs = None                      # one `ps` per poll, only if needed
             seen = set()
             for line in out.strip().splitlines():
                 p = line.split("\t")
                 if len(p) < 6: continue
                 sess, pane, cmd, pid, act, title = p[0], p[1], p[2], p[3], p[4], p[5]
-                agent = {"claude": "claude-code", "codex": "codex"}.get(cmd)
+                if not _agents.session_allowed(sess, cfg):
+                    continue
+                if procs is None:
+                    procs = _agents.read_procs()
+                agent = _agents.find_harness(int(pid), cmd, procs, table)
                 if agent is None: continue
                 key = sess
                 seen.add(key)
                 txt = subprocess.run(["tmux", "capture-pane", "-p", "-t", pane, "-S", "-14"],
                                      capture_output=True, text=True, timeout=5).stdout
-                st, why = classify(txt, cmd)
+                st, why = _agents.classify(txt, agent, table)
                 handle_poll({"src": "tmux-poll", "key": key, "agent": agent,
                              "tmux": sess, "pane": pane, "pid": int(pid),
                              "title": title or sess, "state": st})
