@@ -93,6 +93,61 @@ Two safety properties, both deliberate:
 - Names are validated against a **whitelist** on the host, and every call is argv — never a shell
   string.
 
+## The card material
+
+Everything is specified in units of **card height**, so one set of numbers covers every card size
+and the corner radius stays circular on any aspect. The values come from a look-dev study
+(`inbox/AS-0001/NOTES.md` in the repo history) rather than taste:
+
+| | |
+|---|---:|
+| Corner radius | 0.100 h |
+| Bezel width | 0.018 h |
+| Inner falloff (e-fold) | 0.032 h |
+| Body alpha | **0.88** |
+| Edge gain, rest → attention | 0.38 → 1.10 |
+| Top / bottom edge bias | 1.15 / 0.85 |
+
+⛔ **There is no backdrop blur, and there cannot be.** Godot's Forward Mobile renderer — the one
+the Quest uses — does not support screen-reading shaders. That single constraint decides the
+material: **you cannot have both conspicuous transparency and dependable text contrast over
+arbitrary bright clutter without blur, so the text wins.** At 0.88 body alpha the secondary text
+holds about 4.77:1 over a white background; at 0.42 it is about 1.43:1, which is unreadable the
+moment a bright window sits behind the card. What sells it as glass instead is the lit bezel, a
+soft inner falloff and genuine (if modest) transparency.
+
+For this tint the readability floor is ≈0.87 and the point where it starts reading as a solid
+panel rather than glass is ≈0.94. Those are properties of this tint and background, not universal
+numbers.
+
+⚠️ **Attention is the material brightening, never a border drawn on top**, and never a change of
+position or size: a card that moves when it becomes urgent breaks the layout at exactly the moment
+predictability matters most. Reserve a slot for it instead.
+
+⚠️ The panel needs **size-aware tokens** — a 1.26 m terminal with the session card's 0.100 h radius
+would carve away usable grid. It uses 0.025 h.
+
+⚠️ **Use `unshaded`.** An earlier version added the rim to both `ALBEDO` and `EMISSION` while the
+material was still lit, counting the same light twice.
+
+## Layout is angular arithmetic, not taste
+
+A centred 51° focus panel plus a 15° card needs roughly **33° of centre separation before any
+gutter**. A layout with the focus at 0° and the rail at −34° therefore has about 1° of clearance,
+which is not fixable by nudging. Focus **+6°** with the rail at **−30°** buys about 3° and sits
+closer to forward gaze.
+
+The rail runs at fixed elevations (**+3°, −4°, −11°, −18°** for 5.5° cards with 1.5° gaps) with
+the focus panel at **−10°**. Slots do not reflow: the first is reserved for whichever session
+wants you.
+
+⚠️ **Two quads each aimed at the eye from different positions are not coplanar**, so a frame and
+the panel inside it stop nesting. Aim the group once, then offset children in its local space.
+
+⚠️ **Text size only means something relative to the surface it is drawn on.** Sizing a title
+viewport independently of the grid gave it three times fewer pixels per metre, so the same font
+size came out three times larger and clipped.
+
 ## Surprises, each one paid for
 
 ### tmux types unknown key names instead of rejecting them
