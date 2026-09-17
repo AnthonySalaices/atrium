@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _ws import WS, tmux, token          # noqa: E402
 
 NORMAL, OPTOUT = "glasshouse-pinsmoke-a", "glasshouse-pinsmoke-b"
+LONG = "0123456789" * 15          # 150 chars: 80 + 70 when the pane is 80 wide
 fails = []
 
 
@@ -36,6 +37,18 @@ def geometry(s):
 
 def opt(s, name):
     return tmux("show-options", "-w", "-v", "-t", s, name).stdout.strip()
+
+
+def full_rows(ws, key):
+    """Ask for a complete frame and return it as plain rows."""
+    ws.send({"op": "resync", "key": key})
+    deadline = time.time() + 6.0
+    while time.time() < deadline:
+        f = ws.wait_for("screen")
+        if f and f.get("key") == key and f.get("base") == 0:
+            return ["".join(r[3] for r in l["runs"]).rstrip()
+                    for l in sorted(f["lines"], key=lambda x: x["y"])]
+    return []
 
 
 def make(s):
@@ -82,6 +95,22 @@ def main():
         time.sleep(0.5)
         check(geometry(NORMAL) == "200x50", "normal: restored on unsubscribe", geometry(NORMAL))
         check(opt(NORMAL, "@glasshouse_prev") == "", "normal: record cleared after restore")
+
+        # ⭐ The 9/17 question: after a re-pin, does output printed AFTERWARDS
+        # still wrap at the headset's width, or does it run off the right edge?
+        # (Content drawn BEFORE a resize is a different story — see wrap_note.)
+        ws.send({"op": "subscribe", "key": NORMAL, "cols": 80, "rows": 28})
+        ws.wait_for("screen")
+        time.sleep(0.4)
+        tmux("send-keys", "-t", NORMAL, "printf '%s\\n' " + LONG, "Enter")
+        time.sleep(0.8)
+        # Joined with no separator: a wrapped line is two rows that must read
+        # as one string again. A truncated one never will.
+        body = "".join(full_rows(ws, NORMAL))
+        check(LONG in body, "normal: new output wraps at 80 after a re-pin",
+              "the 150-char line came back broken")
+        ws.send({"op": "unsubscribe", "key": NORMAL})
+        time.sleep(0.4)
         ws.close()
     finally:
         tmux("kill-session", "-t", NORMAL)

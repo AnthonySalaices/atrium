@@ -1,4 +1,5 @@
-import os, sys, unittest
+import copy, os, sys, threading, time, unittest
+from unittest import mock
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "glassd"))
 import screen, sgr
 
@@ -50,6 +51,43 @@ class TestCropFrame(unittest.TestCase):
         out = screen.crop_runs(runs, 3)
         self.assertEqual(sgr.runs_to_text(out), "a漢")
         self.assertEqual(sgr.runs_width(out), 3)
+
+
+class TestMirrorFullIsAtomic(unittest.TestCase):
+    """`full()` must not come back None because the screen loop polled between
+    it clearing `last` and re-reading it: the client asked for everything and
+    got nothing, which on a quiet pane is a panel that stays blank for minutes."""
+
+    def test_full_survives_a_concurrent_poller(self):
+        m = screen.PaneMirror("dummy")
+        frame = {"cols": 4, "rows": 2, "alt": False,
+                 "cursor": {"x": 0, "y": 0, "visible": True},
+                 "grid": [[[sgr.DEFAULT, sgr.DEFAULT, 0, "ab  "]],
+                          [[sgr.DEFAULT, sgr.DEFAULT, 0, "cd  "]]]}
+        stop = threading.Event()
+
+        def slow_capture(t, info=None):
+            # A real capture shells out to tmux. The race needs that cost: the
+            # loop refills `last` while full() is still inside its own capture.
+            time.sleep(0.002)
+            return copy.deepcopy(frame)
+
+        with mock.patch.object(screen, "pane_info", lambda t: frame), \
+             mock.patch.object(screen, "capture", slow_capture):
+            def poller():
+                # Paced like the real screen loop; a tight loop just starves
+                # full() on an unfair lock and makes the suite crawl.
+                while not stop.is_set():
+                    m.poll()
+                    time.sleep(0.002)
+            t = threading.Thread(target=poller, daemon=True)
+            t.start()
+            try:
+                for _ in range(80):
+                    self.assertIsNotNone(m.full(), "full() returned no frame")
+            finally:
+                stop.set()
+                t.join(timeout=2)
 
 
 class TestScreenAgainstLiveTmux(unittest.TestCase):

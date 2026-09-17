@@ -8,6 +8,7 @@ escapes (sgr.py), pad every row to the pane width, and emit row diffs.
 """
 
 import subprocess
+import threading
 
 import sgr
 
@@ -95,6 +96,12 @@ class PaneMirror:
         self.target = target
         self.rev = 0
         self.last = None
+        # ⚠️ The screen loop polls this mirror on its own thread while a client
+        # thread can ask for a full frame. Without the lock, `full()` clearing
+        # `last` and the loop refilling it interleave, and the client's "give me
+        # everything" comes back None — a panel that stays blank until the pane
+        # happens to change. Cheap: one capture per mirror at 12 Hz.
+        self._lock = threading.Lock()
 
     def poll(self):
         """Capture and return a frame message, or None if nothing changed.
@@ -102,6 +109,10 @@ class PaneMirror:
         base == 0 means a full frame (every row). Otherwise base is the rev
         this diff applies to, and only changed rows are included.
         """
+        with self._lock:
+            return self._poll()
+
+    def _poll(self):
         info = pane_info(self.target)
         frame = capture(self.target, info)
 
@@ -142,8 +153,9 @@ class PaneMirror:
 
     def full(self):
         """Force a complete frame — used when a client connects or resyncs."""
-        self.last = None
-        return self.poll()
+        with self._lock:
+            self.last = None
+            return self._poll()
 
 
 def crop_runs(runs, width):

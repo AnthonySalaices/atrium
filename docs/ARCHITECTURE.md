@@ -339,6 +339,14 @@ Vendor option names are effectively undocumented; extract them from the plugin b
   looking at on a desktop shrinks it there too. `glasshouse pin off` (`@glasshouse_pin off`) or
   `sessions.pin_exclude` opts a session out; the host then serves `screen.crop_frame` — the
   bottom `rows` lines and leftmost `cols` cells — so the headset panel keeps its geometry.
+- ⚠️ **A resize reflows the normal screen, never the alternate one.** Output printed *after*
+  a (re)pin wraps correctly at the new width — `tools/pin-smoke.py` asserts a 150-column line
+  comes back as two rows that rejoin — and tmux reflows normal-screen history on resize. What a
+  full-screen app drew *before* the resize is a different thing: the alternate screen is not
+  reflowed, so those rows stay at the old geometry and are clipped until the app itself redraws.
+  ⛔ Do not send `C-l` on subscribe to "fix" it: an app that handles `SIGWINCH` has already
+  redrawn by then, one that ignores `SIGWINCH` ignores `C-l` too, and in an agent TUI it would
+  clear the very panel the user is looking at. The redraw belongs to the user's own keystroke.
 - ⚠️ `pkill -f <pattern>` matches the command line of the shell that invoked it, so it kills its
   own caller. Find the pid from the listening socket instead.
 
