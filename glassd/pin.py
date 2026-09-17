@@ -14,7 +14,13 @@ import threading
 import time
 
 TMUX = "/usr/bin/tmux"
-SILENCE_TIMEOUT = 90.0        # no keepalive for this long -> put it back
+# ⚠️ Was 90 s. The headset stops sending keepalives every time the app is
+# backgrounded (taking the headset off does it), so a short timeout restored
+# the wide desktop geometry, the agent redrew wide, and on resume the re-pin
+# left every already-drawn line truncated at 80 columns — "the text cuts off
+# instead of wrapping" (owner, 9/17). Ten minutes covers a coffee break; the
+# daily pane still comes back if the headset really is gone.
+SILENCE_TIMEOUT = 600.0
 
 _lock = threading.Lock()
 _pinned = {}                  # key -> {"size": str, "cols": int, "rows": int, "seen": float}

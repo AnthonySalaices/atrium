@@ -57,6 +57,9 @@ func _init() -> void:
 const DESIGN_EYE_M := 1.20
 ## How far the room may be shifted to fit a shorter or taller user.
 const SEAT_ADJUST_MAX_M := 0.35
+const SEAT_STEP_M := 0.05
+var _fit_dy := 0.0
+var _fit_set := false
 
 ## Put the room's seat under the user. `t` is the rig transform (head position
 ## and yaw after a recentre); the room takes its x/z and yaw, so recentring
@@ -74,7 +77,16 @@ func anchor(t: Transform3D) -> void:
 	fwd.y = 0.0
 	if fwd.length() < 0.001:
 		fwd = Vector3(0, 0, -1)
-	var dy := clampf(t.origin.y - DESIGN_EYE_M, -SEAT_ADJUST_MAX_M, SEAT_ADJUST_MAX_M)
+	# ⚠️ Recentres arrive with the head anywhere within ~30 cm of "seated" (a
+	# minute of one session logged 0.91–1.22 m), and re-fitting the room to each
+	# reading made the café nudge a few centimetres per press. Quantise to 5 cm
+	# and keep the previous fit unless the reading moved a full step.
+	var raw := clampf(t.origin.y - DESIGN_EYE_M, -SEAT_ADJUST_MAX_M, SEAT_ADJUST_MAX_M)
+	var dy := snappedf(raw, SEAT_STEP_M)
+	if _fit_set and absf(dy - _fit_dy) < SEAT_STEP_M * 0.99:
+		dy = _fit_dy
+	_fit_dy = dy
+	_fit_set = true
 	_anchor = Transform3D(Basis.looking_at(fwd.normalized(), Vector3.UP),
 			Vector3(t.origin.x, dy, t.origin.z))
 	if room:
