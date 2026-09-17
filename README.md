@@ -109,6 +109,9 @@ tools/build-apk.sh
 tools/deploy-quest.sh
 ```
 
+Step by step, including developer mode, the pairing card and what to do when the headset cannot
+find the host: [`docs/INSTALL-QUEST.md`](docs/INSTALL-QUEST.md).
+
 From a checkout the daemon can also be run with `./start.sh --lan` (`./start.sh` alone binds
 loopback, which the headset cannot reach).
 
