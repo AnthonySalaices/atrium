@@ -14,6 +14,8 @@ import json
 import os
 import subprocess
 
+import schemes
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 LUA = os.path.join(ROOT, "vendor", "lua", "bin", "lua")
@@ -263,6 +265,9 @@ def validate(cfg):
         note("ambience.music.mode is 'folder' but ambience.music.dir is unset — "
              "using 'procedural'")
         music["mode"] = "procedural"
+
+    # ── colours (WezTerm-shaped: color_scheme + colors) ─────────────────────
+    notes.extend(schemes.resolve(cfg))
 
     # ── sessions ────────────────────────────────────────────────────────────
     sess = cfg.setdefault("sessions", {})

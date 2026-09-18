@@ -26,6 +26,14 @@ var rows := 28
 
 var fg_default := Color(0.878, 0.898, 0.925)
 var bg_default := Color(0.051, 0.067, 0.09)
+var cursor_bg := Color(0.878, 0.898, 0.925)
+var cursor_fg := Color(0.051, 0.067, 0.09)
+var cursor_border := Color(0.878, 0.898, 0.925)
+## WezTerm's names: Steady|Blinking + Block|Underline|Bar.
+var cursor_style := "SteadyBlock"
+var blink_ms := 800
+var _blink_on := true
+var _blink_t := 0.0
 
 ## rows of [[fg, bg, attrs, text], ...]
 var grid: Array = []
@@ -35,7 +43,9 @@ var _palette: PackedColorArray = PackedColorArray()
 
 
 func _ready() -> void:
-	_build_palette()
+	if _palette.is_empty():
+		_build_palette()
+	set_process(cursor_style.begins_with("Blinking") and blink_ms > 0)
 	grid.resize(rows)
 	for y in range(rows):
 		grid[y] = [[DEFAULT, DEFAULT, 0, " ".repeat(cols)]]
@@ -60,6 +70,44 @@ func _build_palette() -> void:
 	for i in range(24):
 		var v := 8 + i * 10
 		_palette[232 + i] = Color8(v, v, v)
+
+
+## The resolved `colors` table from atriumd (schemes.py): 16 ANSI colours,
+## defaults, cursor, and any `indexed` overrides. The 6x6x6 cube and the greys
+## stay xterm's unless indexed says otherwise, as in WezTerm.
+func set_colors(c: Dictionary, style: String = "SteadyBlock", blink: int = 800) -> void:
+	_build_palette()
+	var ansi: Array = c.get("ansi", [])
+	var brights: Array = c.get("brights", [])
+	for i in range(min(8, ansi.size())):
+		_palette[i] = Color.html(str(ansi[i]))
+	for i in range(min(8, brights.size())):
+		_palette[8 + i] = Color.html(str(brights[i]))
+	var idx: Dictionary = c.get("indexed", {})
+	for k in idx:
+		var n := int(k)
+		if n >= 0 and n < 256:
+			_palette[n] = Color.html(str(idx[k]))
+	fg_default = Color.html(str(c.get("foreground", fg_default.to_html(false))))
+	bg_default = Color.html(str(c.get("background", bg_default.to_html(false))))
+	cursor_bg = Color.html(str(c.get("cursor_bg", fg_default.to_html(false))))
+	cursor_fg = Color.html(str(c.get("cursor_fg", bg_default.to_html(false))))
+	cursor_border = Color.html(str(c.get("cursor_border", cursor_bg.to_html(false))))
+	cursor_style = style
+	blink_ms = blink
+	_blink_on = true
+	_blink_t = 0.0
+	set_process(cursor_style.begins_with("Blinking") and blink_ms > 0)
+	queue_redraw()
+
+
+## Blink by redrawing only on a phase change; a steady cursor never ticks.
+func _process(delta: float) -> void:
+	_blink_t += delta * 1000.0
+	if _blink_t >= blink_ms:
+		_blink_t = fmod(_blink_t, float(blink_ms))
+		_blink_on = not _blink_on
+		queue_redraw()
 
 
 func color_of(c: int, is_fg: bool) -> Color:
@@ -167,6 +215,38 @@ func _draw() -> void:
 				draw_line(Vector2(x * cell.x, sy), Vector2((x + w) * cell.x, sy), fg, 1.5)
 			x += w
 
-	if cursor_visible and cursor.y < rows and cursor.x < cols:
-		draw_rect(Rect2(Vector2(cursor.x * cell.x, cursor.y * cell.y),
-				Vector2(cell.x, cell.y)), fg_default, false, 2.0)
+	if cursor_visible and cursor.y < rows and cursor.x < cols and _blink_on:
+		_draw_cursor(ascent)
+
+
+## WezTerm's shapes: a filled block that re-draws its glyph in cursor_fg, a bar
+## on the cell's left edge, or an underline. The block keeps cursor_border as
+## its outline, which is the whole of what the pre-scheme cursor used to be.
+func _draw_cursor(ascent: float) -> void:
+	var origin := Vector2(cursor.x * cell.x, cursor.y * cell.y)
+	if cursor_style.ends_with("Bar"):
+		draw_rect(Rect2(origin, Vector2(max(2.0, cell.x * 0.12), cell.y)), cursor_bg, true)
+	elif cursor_style.ends_with("Underline"):
+		var h: float = max(2.0, cell.y * 0.08)
+		draw_rect(Rect2(origin + Vector2(0, cell.y - h), Vector2(cell.x, h)), cursor_bg, true)
+	else:
+		draw_rect(Rect2(origin, Vector2(cell.x, cell.y)), cursor_bg, true)
+		draw_rect(Rect2(origin, Vector2(cell.x, cell.y)), cursor_border, false, 2.0)
+		var ch := _char_at(cursor.x, cursor.y)
+		if ch != "" and ch != " ":
+			draw_char(font, origin + Vector2(0, ascent), ch, font_size, cursor_fg)
+
+
+## The glyph under cell (x, y), walking the row's runs.
+func _char_at(x: int, y: int) -> String:
+	if y >= grid.size() or grid[y] == null:
+		return ""
+	var at := 0
+	for run in grid[y]:
+		if run.size() < 4:
+			continue
+		var text: String = str(run[3])
+		if x < at + text.length():
+			return text[x - at]
+		at += text.length()
+	return ""

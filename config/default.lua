@@ -169,6 +169,37 @@ return {
   },
 
   ----------------------------------------------------------------------------
+  -- COLOURS — WezTerm's own keys, so a block from your .wezterm.lua pastes in.
+  ----------------------------------------------------------------------------
+  -- Built in: "atrium", "rose-pine-moon", "Catppuccin Mocha", "Dracula",
+  -- "Tokyo Night". Names match case-insensitively.
+  color_scheme = "atrium",
+
+  -- Override any part of the scheme, exactly as in WezTerm. Colours are
+  -- "#rrggbb" strings or xr.hex(...). Leave out what you do not want to change.
+  --
+  --   colors = {
+  --     foreground = "#e0def4",
+  --     background = "#232136",   -- also the glass the text sits on
+  --     cursor_bg = "#59546d", cursor_fg = "#e0def4", cursor_border = "#59546d",
+  --     ansi    = { "#393552", "#eb6f92", "#3e8fb0", "#f6c177",
+  --                 "#9ccfd8", "#c4a7e7", "#ea9a97", "#e0def4" },
+  --     brights = { "#6e6a86", "#eb6f92", "#3e8fb0", "#f6c177",
+  --                 "#9ccfd8", "#c4a7e7", "#ea9a97", "#e0def4" },
+  --     indexed = { [16] = "#ffb86c" },   -- any of the 256 palette slots
+  --   },
+  --
+  -- WezTerm-only keys (tab_bar, selection_*, split, …) are accepted and ignored.
+  -- ⚠️ Programs that emit truecolor paint exactly what they ask for, here as in
+  -- WezTerm; a scheme only recolours the palette.
+  colors = {},
+
+  -- "SteadyBlock" | "BlinkingBlock" | "SteadyUnderline" | "BlinkingUnderline"
+  -- | "SteadyBar" | "BlinkingBar" — the same names as WezTerm.
+  default_cursor_style = "SteadyBlock",
+  cursor_blink_rate = 800,        -- ms per blink phase; 0 = never blink
+
+  ----------------------------------------------------------------------------
   -- FONT
   ----------------------------------------------------------------------------
   font = {

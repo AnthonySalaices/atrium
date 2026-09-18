@@ -59,6 +59,9 @@ const TEXT_PRIMARY := Color(0.957, 0.969, 0.984)      # #F4F7FB
 const TEXT_SECONDARY := Color(0.882, 0.910, 0.941)    # #E1E8F0
 const AMBER := Color(1.0, 0.722, 0.290)               # #FFB84A
 const BODY := Color(0.0627, 0.0980, 0.1333)           # #101922
+## The live body colour: the config's `colors.background` (terminal.gd sets it),
+## so the frame, the cards and the text behind the cells stay one material.
+static var body := BODY
 
 # Attention motion: the edge gain breathes between these at this rate, never to
 # zero, and only while the card is actually waiting on you.
@@ -206,6 +209,7 @@ static func card(parent: Node, font: Font, pos: Vector3, size: Vector2, title: S
 		parent.add_child(group)
 	var params := CARD_TOKENS.duplicate()
 	params["attention"] = attention
+	params["body_color"] = body
 	params["content"] = vp.get_texture()
 	var mesh := glass(group, size, Vector3.ZERO, params)
 	return {"mesh": mesh, "viewport": vp, "group": group}

@@ -690,7 +690,18 @@ def ws_reader(c):
                                     "error": "scroll rejected: %s" % e})
                 elif msg.get("op") == "ping":
                     for k in c.subs:
-                        _pin.keepalive(k)
+                        # ⚠️ A ping from a client the watchdog gave up on (the
+                        # app was backgrounded > SILENCE_TIMEOUT, then resumed
+                        # on the SAME socket) must re-pin, not just keep alive:
+                        # otherwise the window stays desktop-wide and the
+                        # headset shows a crop that never wraps (9/17).
+                        if _pin.is_pinned(k):
+                            _pin.keepalive(k)
+                            continue
+                        cols, rows = c.want.get(k, (0, 0))
+                        if cols > 0 and rows > 0 and not pin_excluded(k) \
+                                and tmux_session_exists(k) and _pin.pin(k, cols, rows):
+                            print("[pin] %s re-pinned on a live client's ping" % k, flush=True)
                     c.send({"type": "pong", "now": now()})
     except Exception:
         pass

@@ -15,6 +15,10 @@ return {
   -- Text size is angular (dmm), so it holds at any panel distance. Floor is 18.
   -- font = { size_dmm = 22.3 },
 
+  -- Colours use WezTerm's keys, so a `colors = {...}` block from your
+  -- .wezterm.lua pastes straight in.
+  -- color_scheme = "rose-pine-moon",
+
   -- Which tmux sessions to show. Atrium finds agents by what is running in
   -- a pane; these are optional name filters (regular expressions).
   -- sessions = { include = {}, exclude = { "scratch" } },

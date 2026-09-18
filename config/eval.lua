@@ -67,11 +67,17 @@ function encode(v)
       for _, x in ipairs(v) do parts[#parts+1] = encode(x) end
       return "[" .. table.concat(parts, ",") .. "]"
     end
-    local keys = {}
-    for k in pairs(v) do keys[#keys+1] = tostring(k) end
+    -- ⚠️ Look values up by the ORIGINAL key: a sparse { [16] = x } has an
+    -- integer key, and v["16"] is nil.
+    local keys, orig = {}, {}
+    for k in pairs(v) do
+      local s = tostring(k)
+      keys[#keys+1] = s
+      orig[s] = k
+    end
     table.sort(keys)                       -- stable output, so diffs are readable
     local parts = {}
-    for _, k in ipairs(keys) do parts[#parts+1] = q(k) .. ":" .. encode(v[k]) end
+    for _, k in ipairs(keys) do parts[#parts+1] = q(k) .. ":" .. encode(v[orig[k]]) end
     return "{" .. table.concat(parts, ",") .. "}"
   end
   return "null"                            -- functions/userdata are not config

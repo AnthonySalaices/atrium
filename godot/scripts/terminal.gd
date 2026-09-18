@@ -349,8 +349,9 @@ func _build_panel() -> void:
 
 	grid = CellGrid.new()
 	grid.configure(cols, rows, font, GlassUI.FONT_PX, cell)
-	# Same body colour as the frame, so layer and frame read as one slab.
-	grid.bg_default = GlassUI.BODY
+	# The scheme's background is also the frame's body (GlassUI.body), so layer
+	# and frame read as one slab whatever the colours are.
+	_apply_colors()
 	viewport.add_child(grid)
 
 	# The pointer's hover dot lives in the layer's own pixels, hidden until a
@@ -384,6 +385,7 @@ func _build_panel() -> void:
 	var params := GlassUI.FRAME_TOKENS.duplicate()
 	params["attention"] = 0.0
 	params["content"] = frame_vp.get_texture()
+	params["body_color"] = GlassUI.body
 	frame_mesh = GlassUI.glass(focus_group, outer, Vector3(0, title_h * 0.5, -0.004), params)
 	frame_outer = outer
 	# The rail lives INSIDE the focus group so it moves and resizes with it.
@@ -462,6 +464,9 @@ func _apply_config(cfg: Dictionary) -> void:
 	var new_dist := float(p.get("distance_m", distance))
 	var new_pitch := float(p.get("pitch_deg", pitch_deg))
 	_apply_backdrop_config(cfg)
+	if _apply_colors() and frame_mesh:
+		frame_mesh.material_override.set_shader_parameter("body_color", GlassUI.body)
+		_rebuild_rail()
 	_pointer_cfg = cfg.get("pointer", {})
 	if pointers:
 		pointers.set_config(_pointer_cfg,
@@ -484,6 +489,23 @@ func _apply_config(cfg: Dictionary) -> void:
 	_rebuild_rail()
 	client.resync(session)
 	print("[term] config reload -> %d cols, %.1f dmm, %.2f m" % [cols, dmm, distance])
+
+
+## Push the config's resolved colours (atriumd/schemes.py) into the grid and
+## the glass body. Returns true when the body colour changed, so the caller
+## knows the frame and the cards need repainting.
+func _apply_colors() -> bool:
+	var c: Dictionary = _last_cfg.get("colors", {})
+	var before := GlassUI.body
+	if not c.is_empty():
+		GlassUI.body = Color.html(str(c.get("background", "#101922")))
+	if grid:
+		if c.is_empty():
+			grid.bg_default = GlassUI.body
+		else:
+			grid.set_colors(c, str(_last_cfg.get("default_cursor_style", "SteadyBlock")),
+					int(_last_cfg.get("cursor_blink_rate", 800)))
+	return not before.is_equal_approx(GlassUI.body)
 
 
 func recenter() -> void:
