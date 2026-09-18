@@ -224,6 +224,9 @@ def validate(cfg):
             note("pointer.%s must be true/false — using true" % key)
             v = True
         ptr[key] = v
+    if ptr.get("hand") not in ("right", "left", "both"):
+        note("pointer.hand %r is not right/left/both — using 'right'" % ptr.get("hand"))
+        ptr["hand"] = "right"
     v, changed = _clamp(ptr.get("scroll_lines_per_s"), 2.0, 60.0, 14.0)
     if changed:
         note("pointer.scroll_lines_per_s clamped to %g" % v)

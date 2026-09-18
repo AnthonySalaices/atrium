@@ -362,6 +362,8 @@ return {
                             -- take one; copy-mode -e for a plain shell)
     scroll_lines_per_s = 14,  -- thumbstick scroll speed at full deflection
     show_ray = true,        -- draw the ray; the hit dot always shows
+    hand = "right",         -- the pointing hand: "right" | "left" | "both".
+                            -- The other one is your keyboard hand: no ray.
     hands = true,           -- tracked hands at all (ctrl+alt+H toggles live).
                             -- A hand only points when RAISED toward the
                             -- windows, goes silent while you type

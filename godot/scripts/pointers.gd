@@ -64,6 +64,9 @@ var typing_lockout_ms := 1500
 ## Hands at all (ctrl+alt+H flips it; config pointer.hands). Controllers are
 ## never affected by any of the hand rules below.
 var hands_enabled := true
+## Which hand points: "right" | "left" | "both". One mouse hand, one keyboard
+## hand (owner, 9/17: "single handed makes more sense"). Hands and controllers.
+var pointer_hand := "right"
 
 # ⚠️ Hands resting on a keyboard "went wild" (9/17): rays flailing, the hover
 # jumping, stray pinches. Three rules for TRACKED HANDS only:
@@ -168,6 +171,7 @@ func set_config(p: Dictionary, lockout_ms: int) -> void:
 	show_ray = bool(p.get("show_ray", true))
 	scroll_lines_per_s = float(p.get("scroll_lines_per_s", 14.0))
 	hands_enabled = bool(p.get("hands", true))
+	pointer_hand = str(p.get("hand", "right"))
 	typing_lockout_ms = lockout_ms
 	if not enabled:
 		for h in _hands:
@@ -242,6 +246,11 @@ func _process(delta: float) -> void:
 				_end_gesture(h)
 			_hide(h)
 			continue
+		if pointer_hand != "both" and not str(h["side"]).begins_with(pointer_hand):
+			if h["mode"] != "":
+				_end_gesture(h)
+			_hide(h)
+			continue
 		var t := c.global_transform
 		var stick := c.get_vector2("primary")
 		var pressed := c.is_button_pressed("trigger_click")
@@ -266,7 +275,7 @@ func _process(delta: float) -> void:
 				continue
 			pressed = deliberate_pinch(h, pressed, now)
 		var cell := step(h, t.origin, -t.basis.z, pressed,
-				stick, delta, is_hand, c.is_button_pressed("grip_click"))
+				stick, delta, is_hand, c.is_button_pressed("grip_click"), not is_hand)
 		if cell.x > 0:
 			hover = cell
 	if hover != _hover_cell:
@@ -277,9 +286,19 @@ func _process(delta: float) -> void:
 ## One frame of one hand. Pure of XR: the headless check drives this directly.
 ## Returns the grid cell under the ray (1-based) or (-1, -1).
 func step(h: Dictionary, origin: Vector3, dir: Vector3, pressed: bool,
-		stick: Vector2, delta: float, is_hand: bool, grip: bool = false) -> Vector2i:
+		stick: Vector2, delta: float, is_hand: bool, grip: bool = false,
+		grip_on_text_drags: bool = true) -> Vector2i:
 	var hit := _nearest_hit(origin, dir)
 	h["hit"] = hit
+	# ⚠️ A closing HAND reports pinch and grasp together, in either order, so
+	# "grasp = drag, pinch = scroll" was a coin toss over the text ("super hit
+	# or miss", 9/17). For hands the target decides instead: over the text any
+	# close is a press (scroll / tap); only the title strip drags. A drag that
+	# is already running keeps its grip wherever the hand goes.
+	if grip and not grip_on_text_drags and h["mode"] != "drag" \
+			and not hit.is_empty() and hit["kind"] == "grid":
+		pressed = true
+		grip = false
 	var cell := Vector2i(-1, -1)
 	if not hit.is_empty() and hit["kind"] == "grid":
 		cell = hit["cell"]
