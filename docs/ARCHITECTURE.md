@@ -443,6 +443,25 @@ from a subscribed client re-pins rather than only refreshing the timer.
 Otherwise the pane stays desktop-sized and the headset shows a crop whose lines
 never wrap.
 
+### Every glTF clip keys every animated node
+
+Godot's glTF import gives each animation a track for every node that ANY
+animation moves, held at rest where the clip does not move it. One player per
+clip then means every player writes every node every frame and the last one
+wins — the whole room stands still while every player reports "playing".
+`backdrop.gd` keeps only the tracks a clip actually changes;
+`tools/anim-check.gd` fails if the fan or a patron is frozen.
+
+### Sharing a tmux window with the desktop: follow mode
+
+A tmux window has one size. `sessions.pin_mode = "follow"` avoids forcing it:
+the daemon attaches a control-mode client (`tmux -C attach -f no-output`) at the
+headset's size and sets `window-size latest`, so the window follows whichever
+client was active last. ⚠️ `send-keys` from the control client does NOT make it
+"latest" (tmux 3.3a); `select-window` does, so the daemon sends one before
+every keystroke batch and scroll. `tools/follow-smoke.py` drives it with a real
+nested desktop client.
+
 ## Config evaluation
 
 `config/eval.lua` loads `config/default.lua`, deep-merges the user's table over it, and prints
