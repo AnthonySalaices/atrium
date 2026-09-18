@@ -280,6 +280,63 @@ def validate(cfg):
              "using 'procedural'")
         music["mode"] = "procedural"
 
+    # ── browser ─────────────────────────────────────────────────────────────
+    br = cfg.get("browser")
+    if not isinstance(br, dict):
+        note("browser must be a table — using defaults")
+        br = {}
+    cfg["browser"] = br
+    br["enabled"] = br.get("enabled", True) is not False
+    for layout, (dw, dh, ds) in (("desktop", (1280, 800, 1.0)), ("mobile", (430, 860, 2.0))):
+        lay = br.get(layout)
+        if not isinstance(lay, dict):
+            lay = {}
+        w, _ = _clamp(lay.get("width"), 320, 3840, dw)
+        h, _ = _clamp(lay.get("height"), 320, 3840, dh)
+        sc, changed = _clamp(lay.get("scale"), 1.0, 3.0, ds)
+        if changed:
+            note("browser.%s.scale clamped to %g" % (layout, sc))
+        br[layout] = {"width": int(w), "height": int(h), "scale": sc}
+    v, _ = _clamp(br.get("fps"), 1, 30, 15)
+    br["fps"] = int(v)
+    v, _ = _clamp(br.get("quality"), 30, 95, 70)
+    br["quality"] = int(v)
+    if not isinstance(br.get("profile_dir"), str) or not br["profile_dir"].strip():
+        br["profile_dir"] = "~/.local/share/atrium/browser"
+    apps, names = [], set()
+    raw = br.get("apps")
+    if isinstance(raw, dict) and not raw:
+        raw = []
+    if not isinstance(raw, list):
+        note("browser.apps must be a list — ignored")
+        raw = []
+    for i, a in enumerate(raw, 1):
+        if not isinstance(a, dict):
+            note("browser.apps[%d] must be a table — ignored" % i)
+            continue
+        name, url = a.get("name"), a.get("url")
+        if not isinstance(name, str) or not re.match(r"^[A-Za-z0-9_.-]{1,40}$", name):
+            note("browser.apps[%d].name %r must be letters/digits/._- — ignored" % (i, name))
+            continue
+        if name in names:
+            note("browser.apps: duplicate name %r — ignored" % name)
+            continue
+        if not isinstance(url, str) or not re.match(r"^https?://", url):
+            note("browser.apps[%d] (%s): url must start with http:// or https:// — ignored"
+                 % (i, name))
+            continue
+        layout = a.get("layout", "desktop")
+        if layout not in ("desktop", "mobile"):
+            note("browser.apps[%d] (%s): layout %r is not desktop/mobile — using desktop"
+                 % (i, name, layout))
+            layout = "desktop"
+        names.add(name)
+        app = {"name": name, "url": url, "layout": layout}
+        if isinstance(a.get("title"), str):
+            app["title"] = a["title"]
+        apps.append(app)
+    br["apps"] = apps
+
     # ── colours (WezTerm-shaped: color_scheme + colors) ─────────────────────
     notes.extend(schemes.resolve(cfg))
 

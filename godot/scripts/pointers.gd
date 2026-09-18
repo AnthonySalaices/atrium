@@ -39,6 +39,10 @@ signal focus_resized(factor: float)
 signal scroll(lines: int, col: int, row: int)
 ## The cell the ray is over, or (-1, -1). Only emitted when it changes.
 signal grid_hover(col: int, row: int)
+## A quick press-and-release on the text/page surface that did not scroll.
+## `uv` is 0..1 across the layer, (0,0) top-left. Terminals ignore it; a web
+## page turns it into a click.
+signal surface_tap(uv: Vector2)
 
 const TAP_MAX_S := 0.6
 const DRAG_DIST_MIN := 0.6
@@ -280,6 +284,7 @@ func _begin_gesture(h: Dictionary, hit: Dictionary, origin: Vector3, dir: Vector
 				return
 			h["mode"] = "scroll"
 			h["press_local_y"] = hit["local"].y
+			h["scrolled"] = false
 		"card", "overflow":
 			if not allow_select:
 				return
@@ -308,6 +313,7 @@ func _continue_gesture(h: Dictionary, hit: Dictionary, origin: Vector3, dir: Vec
 			var dy: float = hit["local"].y - h["press_local_y"]
 			var rows := int(dy / row_h)
 			if rows != 0:
+				h["scrolled"] = true
 				h["press_local_y"] += rows * row_h
 				var cell: Vector2i = hit.get("cell", Vector2i(1, 1))
 				emit_signal("scroll", -rows, maxi(cell.x, 1), maxi(cell.y, 1))
@@ -324,6 +330,11 @@ func _release(h: Dictionary, hit: Dictionary, now_ms: int) -> void:
 			emit_signal("overflow_selected")
 		else:
 			emit_signal("card_selected", str(target["key"]))
+	elif mode == "scroll" and not h.get("scrolled", true) and not hit.is_empty() \
+			and hit["kind"] == "grid" \
+			and (now_ms / 1000.0 - float(h["press_t"])) <= TAP_MAX_S:
+		_haptic(h, HAPTIC_TAP)
+		emit_signal("surface_tap", _uv_for(hit["local"]))
 	_end_gesture(h)
 
 
@@ -376,6 +387,13 @@ func _nearest_hit(origin: Vector3, dir: Vector3) -> Dictionary:
 			r["mesh"] = m
 			best = r
 	return best
+
+
+## The frame's local point -> 0..1 across the layer, (0,0) top-left.
+func _uv_for(local: Vector2) -> Vector2:
+	var gy := local.y + _title_h * 0.5
+	return Vector2(clampf((local.x + _term_size.x * 0.5) / _term_size.x, 0.0, 1.0),
+			clampf((_term_size.y * 0.5 - gy) / _term_size.y, 0.0, 1.0))
 
 
 ## The frame's local point -> 1-based grid cell. The layer sits at the group

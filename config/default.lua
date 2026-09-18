@@ -312,6 +312,29 @@ return {
   },
 
   ----------------------------------------------------------------------------
+  -- BROWSER — web apps on a panel, one app per card, never a tab bar.
+  ----------------------------------------------------------------------------
+  -- A real Chromium runs HERE, on the host, and the headset shows its frames:
+  -- point + trigger/pinch clicks, the thumbstick scrolls, the keyboard types
+  -- into the page, ctrl+alt+Left goes back. A link that opens a new tab loads
+  -- in place. Logins persist in profile_dir. Chromium only starts once an app
+  -- is listed.
+  browser = {
+    enabled = true,
+    apps = {
+      -- { name = "docs", url = "https://example.com", layout = "desktop" },
+      -- { name = "chat", url = "https://example.com/m", layout = "mobile" },
+    },
+    -- The two page sizes an app can use, in CSS pixels. scale > 1 renders
+    -- sharper frames (and costs ~60 ms a frame; desktop at 1.0 is ~free).
+    desktop = { width = 1280, height = 800, scale = 1.0 },
+    mobile  = { width = 430,  height = 860, scale = 2.0 },
+    fps = 15,                   -- frame cap per app; frames only flow on change
+    quality = 70,               -- JPEG quality, 30-95
+    profile_dir = "~/.local/share/atrium/browser",
+  },
+
+  ----------------------------------------------------------------------------
   -- KEYS
   ----------------------------------------------------------------------------
   keys = {

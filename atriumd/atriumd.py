@@ -32,6 +32,7 @@ import agents as _agents
 import pairing as _pairing
 import spawn as _spawn
 import follow as _follow
+import browser as _browsermod
 
 _pair = _pairing.Pairing()
 
@@ -112,6 +113,8 @@ def screen_loop():
                 if c.alive:
                     wanted |= c.subs
             for key in wanted:
+                if _browsermod.is_web(key):
+                    continue           # frames come from the web sender
                 try:
                     msg = mirror_for(key).poll()
                 except Exception:
@@ -137,6 +140,7 @@ def config_poll_loop():
             w = cfgwatch()
             if w.poll():
                 _broadcast(w.frame())
+                browser_sync(w.config)
         except Exception:
             pass
         time.sleep(1.0)
@@ -161,6 +165,60 @@ def pin_excluded(key):
         except re.error:
             continue
     return False
+
+
+# ── browser mode ────────────────────────────────────────────────────────────
+_browser = None                # browser.Browser, created only once an app is configured
+_web_latest = {}               # key -> newest frame not yet sent
+_web_cond = threading.Condition()
+
+
+def _on_web_frame(key, msg):
+    """Browser thread: park the newest frame and wake the sender. Never sends
+    from here — a slow client must not stall Chromium's event loop."""
+    with _web_cond:
+        _web_latest[key] = msg
+        _web_cond.notify()
+
+
+def web_send_loop():
+    """Send each app's NEWEST frame to its watchers; older ones are dropped, so
+    a slow link gets fewer frames instead of a growing backlog."""
+    while True:
+        with _web_cond:
+            while not _web_latest:
+                _web_cond.wait()
+            batch = dict(_web_latest)
+            _web_latest.clear()
+        for key, msg in batch.items():
+            for c in list(_clients):
+                if c.alive and key in c.subs:
+                    c.send(msg)
+
+
+def browser_sync(cfg):
+    """Match running web apps to `browser.apps`. Chromium starts only when the
+    first app is configured, so a user without any costs nothing."""
+    global _browser
+    b = (cfg or {}).get("browser") or {}
+    apps = b.get("apps", []) if b.get("enabled", True) else []
+    if not apps and _browser is None:
+        return
+    if _browser is None:
+        try:
+            _browser = _browsermod.Browser(_on_web_frame)
+        except Exception as e:
+            print("[browser] could not start: %s" % e, flush=True)
+            return
+    keys = set(_browser.configure(dict(b, apps=apps)))
+    with _lock:
+        stale = [k for k in _sessions if _browsermod.is_web(k) and k not in keys]
+    for k in stale:
+        drop(k, "removed-from-config")
+    for a in apps:
+        upsert(_browsermod.PREFIX + a["name"], source="web", agent="web",
+               title=a.get("title") or a["name"], state="idle")
+    print("[browser] %d app(s): %s" % (len(keys), ", ".join(sorted(keys)) or "none"), flush=True)
 
 
 def _follow_mode():
@@ -377,6 +435,9 @@ def udp_loop():
 class Client:
     def __init__(self, conn, kind):
         self.conn, self.kind, self.alive = conn, kind, True
+        # ⚠️ Several threads send to one socket (screen loop, reader, web
+        # sender); a 160 KB web frame interleaved with a diff corrupts both.
+        self._wlock = threading.Lock()
         self.subs = set()          # tmux session names this client wants pixels for
         self.want = {}             # key -> (cols, rows) the client asked for
 
@@ -393,10 +454,11 @@ class Client:
     def send(self, obj):
         try:
             payload = json.dumps(obj, separators=(",", ":")).encode()
-            if self.kind == "ws":
-                self.conn.sendall(ws_frame(payload))
-            else:                       # sse
-                self.conn.sendall(b"data: " + payload + b"\n\n")
+            with self._wlock:
+                if self.kind == "ws":
+                    self.conn.sendall(ws_frame(payload))
+                else:                       # sse
+                    self.conn.sendall(b"data: " + payload + b"\n\n")
         except Exception:
             self.alive = False
 
@@ -632,6 +694,19 @@ def ws_reader(c):
                     c.send(snapshot())
                 elif msg.get("op") == "ack" and msg.get("key"):
                     upsert(msg["key"], unread=False)
+                elif msg.get("op") == "subscribe" and _browsermod.is_web(msg.get("key")):
+                    key = msg["key"]
+                    if _browser is None or key not in _browser.keys():
+                        c.send({"type": "error", "key": key, "error": "no such web app"})
+                        continue
+                    if key not in c.subs:
+                        c.subs.add(key)
+                        try:
+                            first = _browser.watch(key)
+                            if first:
+                                c.send(first)
+                        except Exception as e:
+                            c.send({"type": "error", "key": key, "error": "web: %s" % e})
                 elif msg.get("op") == "subscribe" and msg.get("key"):
                     key = msg["key"]
                     c.subs.add(key)
@@ -658,6 +733,25 @@ def ws_reader(c):
                             c.send(c.view(key, full))
                     except Exception as e:
                         c.send({"type": "error", "key": key, "error": str(e)})
+                elif msg.get("op") == "unsubscribe" and _browsermod.is_web(msg.get("key")):
+                    if msg["key"] in c.subs:
+                        c.subs.discard(msg["key"])
+                        if _browser is not None:
+                            _browser.unwatch(msg["key"])
+                elif msg.get("op") in ("web_pointer", "web_nav") and msg.get("key"):
+                    key = msg["key"]
+                    if key not in c.subs or _browser is None or not _browsermod.is_web(key):
+                        c.send({"type": "error", "key": key, "error": "not subscribed"})
+                        continue
+                    if msg["op"] == "web_nav":
+                        if msg.get("what") == "back":
+                            _browser.back(key)
+                        elif msg.get("what") == "reload":
+                            _browser.reload(key)
+                    elif msg.get("kind") == "click":
+                        _browser.click(key, msg.get("u", 0.5), msg.get("v", 0.5))
+                    else:
+                        _browser.move(key, msg.get("u", 0.5), msg.get("v", 0.5))
                 elif msg.get("op") == "unsubscribe" and msg.get("key"):
                     c.subs.discard(msg["key"])
                     if not any(msg["key"] in o.subs for o in _clients if o.alive and o is not c):
@@ -680,8 +774,16 @@ def ws_reader(c):
                                 "error": "not subscribed"})
                     else:
                         try:
-                            _follow.claim(key)      # typing here = headset-sized
-                            n = _keys.send(key, msg.get("seq", []))
+                            if _browsermod.is_web(key):
+                                if _browser is None:
+                                    raise _keys.Rejected("browser not running")
+                                try:
+                                    n = _browser.send_keys(key, msg.get("seq", []))
+                                except ValueError as e:
+                                    raise _keys.Rejected(str(e))
+                            else:
+                                _follow.claim(key)      # typing here = headset-sized
+                                n = _keys.send(key, msg.get("seq", []))
                             # Typing into a panel is an acknowledgement: you are
                             # looking at it, so stop asking for attention.
                             if n:
@@ -702,6 +804,12 @@ def ws_reader(c):
                                 "error": "not subscribed"})
                     else:
                         try:
+                            if _browsermod.is_web(key):
+                                if _browser is not None:
+                                    _browser.wheel(key, msg.get("u", 0.5), msg.get("v", 0.5),
+                                                   int(msg.get("lines", 0)))
+                                c.send({"type": "scroll-ack", "key": key, "via": "web"})
+                                continue
                             _follow.claim(key)
                             r = _keys.scroll(key, msg.get("lines", 0),
                                              msg.get("col", 1), msg.get("row", 1))
@@ -730,6 +838,10 @@ def ws_reader(c):
                     if key not in c.subs:
                         c.send({"type": "error", "key": key, "error": "not subscribed"})
                         continue
+                    if _browsermod.is_web(key):
+                        c.send({"type": "error", "key": key,
+                                "error": "web apps come from browser.apps in the config"})
+                        continue
                     try:
                         c.subs.discard(key)
                         headset_release(key)
@@ -741,6 +853,8 @@ def ws_reader(c):
                         c.send({"type": "error", "key": key, "error": "close failed: %s" % e})
                 elif msg.get("op") == "ping":
                     for k in c.subs:
+                        if _browsermod.is_web(k):
+                            continue
                         # ⚠️ A ping from a client the watchdog gave up on (the
                         # app was backgrounded > SILENCE_TIMEOUT, then resumed
                         # on the SAME socket) must re-pin, not just keep alive:
@@ -764,7 +878,10 @@ def ws_reader(c):
         except ValueError: pass
         # ⛔ Never leave someone's window at VR geometry because a client died.
         for k in list(c.subs):
-            if not any(k in o.subs for o in _clients if o.alive):
+            if _browsermod.is_web(k):
+                if _browser is not None:
+                    _browser.unwatch(k)
+            elif not any(k in o.subs for o in _clients if o.alive):
                 headset_release(k)
         try: conn.close()
         except Exception: pass
@@ -850,6 +967,8 @@ def poll_loop():
             with _lock:
                 known = list(_sessions.keys())
             for k in known:
+                if _browsermod.is_web(k):
+                    continue           # web apps live and die with browser.apps
                 if not tmux_session_exists(k):
                     drop(k, "session-gone")
         except Exception:
@@ -861,7 +980,7 @@ def main():
     _pin.install_exit_hooks()
     _pin.recover()
     for fn in (udp_loop, tcp_loop, poll_loop, config_poll_loop, screen_loop,
-               _pin.watchdog_loop):
+               _pin.watchdog_loop, web_send_loop):
         threading.Thread(target=fn, daemon=True).start()
     try:
         w = cfgwatch()
@@ -871,6 +990,10 @@ def main():
             print(f"config warning: {n}", flush=True)
     except Exception as e:
         print(f"config FAILED to load: {e}", flush=True)
+    try:
+        browser_sync(_current_config())
+    except Exception as e:
+        print(f"[browser] sync failed: {e}", flush=True)
     if TOKEN is None:
         print("⚠️  AUTH DISABLED (ATRIUM_AUTH=none) — loopback only, never expose this",
               flush=True)

@@ -19,6 +19,8 @@ signal focus_hint(key)
 signal session_removed(key)
 ## The host started the session we asked for with new_session().
 signal session_created(key)
+## A JPEG frame of a web app (browser mode).
+signal web_frame(msg)
 
 @export var host := "127.0.0.1"
 @export var port := 7570
@@ -54,6 +56,11 @@ func reconnect() -> void:
 
 func _connect() -> void:
 	emit_signal("link_state", "connecting to %s:%d" % [host, port])
+	# ⛔ Godot's default inbound buffer is 64 KB and a web frame is ~60-200 KB:
+	# the socket closes with 1009 (message too big) on every frame. Set before
+	# connecting — it cannot change on an open socket.
+	_ws.inbound_buffer_size = 8 * 1024 * 1024
+	_ws.max_queued_packets = 64
 	var err := _ws.connect_to_url(url())
 	if err != OK:
 		emit_signal("link_state", "connect failed: %d" % err)
@@ -112,10 +119,23 @@ func send_keys(key: String, seq: Array, stamp := 0) -> void:
 
 ## A pointer scroll. `lines` > 0 = older; col/row = the 1-based cell under
 ## the ray, which the host forwards to apps that take a mouse wheel.
-func send_scroll(key: String, lines: int, col: int, row: int) -> void:
+func send_scroll(key: String, lines: int, col: int, row: int, uv := Vector2(0.5, 0.5)) -> void:
 	if not connected or lines == 0:
 		return
-	_send({"op": "scroll", "key": key, "lines": lines, "col": col, "row": row})
+	_send({"op": "scroll", "key": key, "lines": lines, "col": col, "row": row,
+			"u": uv.x, "v": uv.y})
+
+
+## Browser mode: a click or a mouse move at page coordinates 0..1.
+func send_web_pointer(key: String, kind: String, uv: Vector2) -> void:
+	if connected:
+		_send({"op": "web_pointer", "key": key, "kind": kind, "u": uv.x, "v": uv.y})
+
+
+## Browser mode: "back" or "reload".
+func send_web_nav(key: String, what: String) -> void:
+	if connected:
+		_send({"op": "web_nav", "key": key, "what": what})
 
 
 func _send(obj: Dictionary) -> void:
@@ -177,6 +197,8 @@ func _process(delta: float) -> void:
 				emit_signal("config_changed", msg.get("config", {}))
 			"removed", "session-closed":
 				emit_signal("session_removed", str(msg.get("key", "")))
+			"web-frame":
+				emit_signal("web_frame", msg)
 			"session-created":
 				emit_signal("session_created", str(msg.get("key", "")))
 			"keys-ack":

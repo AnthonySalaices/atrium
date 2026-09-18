@@ -55,6 +55,13 @@ var link_text := ""              # non-empty while not connected
 # `cropped: [cols, rows]`. Say so in the strip — without it the missing right-hand
 # columns read as a rendering bug. Keyed by session: a late frame from the one we
 # just left must not relabel the one we are looking at.
+# Browser mode: a web app replaces the grid with its frames, in the SAME layer.
+var web_rect: TextureRect
+var _web_tex: ImageTexture
+var _web_css := Vector2(1280, 800)   # the page's CSS size, for mapping clicks
+var _web_decoding := false
+var _web_pending = null              # newest frame that arrived mid-decode
+var _web_hover := Vector2i(-1, -1)
 var _button_groups: Array = []   # [Node3D], index = button_local slot
 var _close_armed_ms := 0          # Close waits for a second tap until this time
 const CLOSE_CONFIRM_MS := 3000
@@ -122,7 +129,9 @@ func _ready() -> void:
 	pointers.overflow_selected.connect(func(): cycle_session(+1))
 	pointers.focus_moved.connect(_on_focus_dragged)
 	pointers.focus_resized.connect(_on_focus_resized)
-	pointers.scroll.connect(func(lines, col, row): client.send_scroll(session, lines, col, row))
+	pointers.scroll.connect(func(lines, col, row):
+		client.send_scroll(session, lines, col, row, _page_uv(_cell_uv(col, row))))
+	pointers.surface_tap.connect(_on_surface_tap)
 	pointers.grid_hover.connect(_on_grid_hover)
 	_push_pointer_targets()
 
@@ -141,6 +150,7 @@ func _ready() -> void:
 		if m.has("skipped"):
 			print("[scroll] skipped: %s" % str(m["skipped"])))
 	client.sessions.connect(_on_sessions)
+	client.web_frame.connect(_on_web_frame)
 	client.session_removed.connect(_on_session_removed)
 	client.session_created.connect(func(k): if k != "": switch_to(k))
 	client.focus_hint.connect(func(k):
@@ -359,6 +369,14 @@ func _build_panel() -> void:
 	_apply_colors()
 	viewport.add_child(grid)
 
+	web_rect = TextureRect.new()
+	web_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	web_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	web_rect.size = Vector2(vp_w, vp_h)
+	web_rect.texture = _web_tex if is_web() else null
+	viewport.add_child(web_rect)
+	_show_surface()
+
 	# The pointer's hover dot lives in the layer's own pixels, hidden until a
 	# ray crosses the text. One cell, amber, translucent.
 	hover_dot = ColorRect.new()
@@ -455,6 +473,8 @@ func _build_buttons(k: float) -> void:
 	var armed := Time.get_ticks_msec() < _close_armed_ms
 	var specs := [["__close", "Confirm?" if armed else "Close", 1.0 if armed else 0.0],
 			["__new", "+ New", 0.0]]
+	if is_web():
+		specs = [["__reload", "Reload", 0.0], ["__back", "Back", 0.0]]
 	for i in range(specs.size()):
 		var b := GlassUI.button(rail_root, font, GlassUI.button_local(frame_outer, size * k, i),
 				size, specs[i][1], specs[i][2])
@@ -467,6 +487,10 @@ func _on_card_selected(key: String) -> void:
 	match key:
 		"__new":
 			client.new_session()
+		"__back":
+			client.send_web_nav(session, "back")
+		"__reload":
+			client.send_web_nav(session, "reload")
 		"__close":
 			if Time.get_ticks_msec() < _close_armed_ms:
 				_close_armed_ms = 0
@@ -574,6 +598,93 @@ func _set_font(family: String, line_height: float) -> bool:
 	GlassUI.cell = GlassUI.measure_cell(font, line_height)
 	print("[term] font %s, cell %s" % [path.get_file(), GlassUI.cell])
 	return true
+
+
+# ── browser mode ────────────────────────────────────────────────────────────
+
+func is_web() -> bool:
+	return session.begins_with("web:")
+
+
+## The grid stays visible under a page as a blank, cursor-less backdrop, so
+## the letterbox bars beside a phone-width app are the scheme's background.
+func _show_surface() -> void:
+	if grid and is_web():
+		grid.clear()
+		grid.cursor_visible = false
+	if web_rect:
+		web_rect.visible = is_web()
+
+
+## JPEG decode is off the main thread: a 860x1720 frame costs several ms and
+## the Quest renders at 72+ Hz. Newest-frame-wins while one is decoding.
+func _on_web_frame(msg: Dictionary) -> void:
+	if str(msg.get("key", "")) != session:
+		return
+	if _web_decoding:
+		_web_pending = msg
+		return
+	_web_decoding = true
+	WorkerThreadPool.add_task(_decode_web.bind(msg))
+
+
+func _decode_web(msg: Dictionary) -> void:
+	var img := Image.new()
+	var err := img.load_jpg_from_buffer(Marshalls.base64_to_raw(str(msg.get("jpeg", ""))))
+	call_deferred("_web_decoded", img if err == OK else null, str(msg.get("key", "")),
+			Vector2(float(msg.get("css_w", 1280)), float(msg.get("css_h", 800))))
+
+
+func _web_decoded(img: Image, key: String, css: Vector2) -> void:
+	_web_decoding = false
+	if img != null and key == session:
+		if _web_tex != null and Vector2i(_web_tex.get_size()) == img.get_size():
+			_web_tex.update(img)
+		else:
+			_web_tex = ImageTexture.create_from_image(img)
+			if web_rect:
+				web_rect.texture = _web_tex
+		_web_css = css
+		_frames += 1
+		if _frames <= 3 or _frames % 100 == 0:
+			print("[web] %s frame #%d %dx%d" % [key, _frames, img.get_width(), img.get_height()])
+	if _web_pending != null:
+		var m: Dictionary = _web_pending
+		_web_pending = null
+		_on_web_frame(m)
+
+
+## Cell (1-based) -> layer 0..1, at the cell's centre.
+func _cell_uv(col: int, row: int) -> Vector2:
+	return Vector2((float(col) - 0.5) / float(cols), (float(row) - 0.5) / float(rows))
+
+
+## Layer 0..1 -> page 0..1 through the letterbox (KEEP_ASPECT_CENTERED).
+## Returns (-1, -1) for a point on the bars, which must not click anything.
+func _page_uv(uv: Vector2) -> Vector2:
+	if web_rect == null or _web_css.y <= 0.0:
+		return uv
+	var panel := web_rect.size
+	var a := _web_css.x / _web_css.y
+	var w := panel.x
+	var h := panel.y
+	if panel.x / panel.y > a:
+		w = panel.y * a
+	else:
+		h = panel.x / a
+	var p := Vector2((uv.x * panel.x - (panel.x - w) * 0.5) / w,
+			(uv.y * panel.y - (panel.y - h) * 0.5) / h)
+	if p.x < 0.0 or p.x > 1.0 or p.y < 0.0 or p.y > 1.0:
+		return Vector2(-1, -1)
+	return p
+
+
+func _on_surface_tap(uv: Vector2) -> void:
+	if not is_web():
+		return
+	var p := _page_uv(uv)
+	if p.x >= 0.0:
+		client.send_web_pointer(session, "click", p)
 
 
 ## Push the config's resolved colours (atriumd/schemes.py) into the grid and
@@ -708,6 +819,11 @@ func switch_to(key: String) -> void:
 	session = key
 	if grid:
 		grid.clear()                     # never show the old session's text
+	_web_tex = null                      # nor the old page
+	_web_pending = null
+	if web_rect:
+		web_rect.texture = null
+	_show_surface()
 	client.subscribe(session, cols, rows)
 	_update_status()
 	_rebuild_rail()
@@ -860,6 +976,12 @@ func _physics_process(_delta: float) -> void:
 func _on_grid_hover(col: int, row: int) -> void:
 	if hover_dot == null:
 		return
+	# A web page gets real mouse moves (hover menus, tooltips), one per cell.
+	if is_web() and col >= 1 and row >= 1 and Vector2i(col, row) != _web_hover:
+		_web_hover = Vector2i(col, row)
+		var p := _page_uv(_cell_uv(col, row))
+		if p.x >= 0.0:
+			client.send_web_pointer(session, "move", p)
 	if col < 1 or row < 1:
 		hover_dot.visible = false
 		return
