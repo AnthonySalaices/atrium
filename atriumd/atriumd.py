@@ -30,6 +30,7 @@ import keys as _keys
 import focus as _focus
 import agents as _agents
 import pairing as _pairing
+import spawn as _spawn
 
 _pair = _pairing.Pairing()
 
@@ -688,6 +689,34 @@ def ws_reader(c):
                             print("[scroll] rejected for %s: %s" % (key, e), flush=True)
                             c.send({"type": "error", "key": key,
                                     "error": "scroll rejected: %s" % e})
+                elif msg.get("op") == "new_session":
+                    # What runs comes from the HOST's config, never the message.
+                    spec = (_current_config().get("sessions") or {}).get("new") or {}
+                    if not spec.get("enabled", True):
+                        c.send({"type": "error", "error": "new sessions are disabled (sessions.new.enabled)"})
+                        continue
+                    try:
+                        name = _spawn.new_session(spec)
+                        print("[spawn] %s started (%s)" % (name, spec.get("command")), flush=True)
+                        upsert(name, source="spawn")
+                        c.send({"type": "session-created", "key": name})
+                    except Exception as e:
+                        c.send({"type": "error", "error": "new session failed: %s" % e})
+                elif msg.get("op") == "close_session" and msg.get("key"):
+                    key = msg["key"]
+                    # Same rule as typing: only a pane this client is watching.
+                    if key not in c.subs:
+                        c.send({"type": "error", "key": key, "error": "not subscribed"})
+                        continue
+                    try:
+                        c.subs.discard(key)
+                        _pin.unpin(key)
+                        _spawn.close_session(key)
+                        print("[spawn] %s closed from the headset" % key, flush=True)
+                        drop(key, "closed")
+                        c.send({"type": "session-closed", "key": key})
+                    except Exception as e:
+                        c.send({"type": "error", "key": key, "error": "close failed: %s" % e})
                 elif msg.get("op") == "ping":
                     for k in c.subs:
                         # ⚠️ A ping from a client the watchdog gave up on (the

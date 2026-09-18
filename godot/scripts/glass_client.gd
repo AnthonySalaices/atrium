@@ -15,6 +15,10 @@ signal keys_ack(msg)
 signal scroll_ack(msg)
 ## The host's recommendation for `jump to whoever needs me`, or "" for nobody.
 signal focus_hint(key)
+## A session ended or was closed — drop its card.
+signal session_removed(key)
+## The host started the session we asked for with new_session().
+signal session_created(key)
 
 @export var host := "127.0.0.1"
 @export var port := 7570
@@ -78,6 +82,18 @@ func unsubscribe(key: String) -> void:
 	_subscribed.erase(key)
 	if connected:
 		_send({"op": "unsubscribe", "key": key})
+
+
+## Ask for a fresh session. The host decides what runs (sessions.new).
+func new_session() -> void:
+	if connected:
+		_send({"op": "new_session"})
+
+
+## Kill a session this client is watching. The caller confirms first.
+func close_session(key: String) -> void:
+	if connected:
+		_send({"op": "close_session", "key": key})
 
 
 func resync(key: String) -> void:
@@ -159,6 +175,10 @@ func _process(delta: float) -> void:
 				emit_signal("sessions", [msg.get("session", {})])
 			"config":
 				emit_signal("config_changed", msg.get("config", {}))
+			"removed", "session-closed":
+				emit_signal("session_removed", str(msg.get("key", "")))
+			"session-created":
+				emit_signal("session_created", str(msg.get("key", "")))
 			"keys-ack":
 				emit_signal("keys_ack", msg)
 			"scroll-ack":

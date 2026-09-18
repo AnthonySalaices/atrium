@@ -55,6 +55,9 @@ var link_text := ""              # non-empty while not connected
 # `cropped: [cols, rows]`. Say so in the strip — without it the missing right-hand
 # columns read as a rendering bug. Keyed by session: a late frame from the one we
 # just left must not relabel the one we are looking at.
+var _button_groups: Array = []   # [Node3D], index = button_local slot
+var _close_armed_ms := 0          # Close waits for a second tap until this time
+const CLOSE_CONFIRM_MS := 3000
 var _cropped := {}               # session key -> Vector2i(cols, rows) of the real pane
 
 # The rail of session cards to the left. Rebuilt whenever the session list
@@ -98,7 +101,7 @@ func _ready() -> void:
 		get_tree().change_scene_to_file("res://scenes/preview.tscn")
 		return
 
-	font = load("res://fonts/IosevkaTerm-Medium.ttf")
+	_set_font("Iosevka Term", 1.25)
 	_boot_xr()
 
 	var origin := XROrigin3D.new()
@@ -115,7 +118,7 @@ func _ready() -> void:
 	# tracker poses are origin-relative and the rig moves on every recentre.
 	pointers = Pointers.new()
 	origin.add_child(pointers)
-	pointers.card_selected.connect(switch_to)
+	pointers.card_selected.connect(_on_card_selected)
 	pointers.overflow_selected.connect(func(): cycle_session(+1))
 	pointers.focus_moved.connect(_on_focus_dragged)
 	pointers.focus_resized.connect(_on_focus_resized)
@@ -138,6 +141,8 @@ func _ready() -> void:
 		if m.has("skipped"):
 			print("[scroll] skipped: %s" % str(m["skipped"])))
 	client.sessions.connect(_on_sessions)
+	client.session_removed.connect(_on_session_removed)
+	client.session_created.connect(func(k): if k != "": switch_to(k))
 	client.focus_hint.connect(func(k):
 		if k != focus_key:
 			focus_key = k
@@ -333,7 +338,7 @@ func px_for_dmm(v: float, dist_m: float, panel_w_m: float, vp_px: int) -> int:
 
 
 func _build_panel() -> void:
-	var cell := GlassUI.CELL
+	var cell := GlassUI.cell
 	var vp_w := cols * cell.x
 	var vp_h := rows * cell.y
 	# ⚠️ The status text used to live on an extra row INSIDE the terminal layer.
@@ -418,24 +423,80 @@ func _rebuild_rail() -> void:
 	waiting_cards.clear()
 	var slots := GlassUI.rail_slots(known, session, focus_key)
 	var size := GlassUI.angular_size(GlassUI.CARD_W_DEG, GlassUI.CARD_H_DEG, distance)
+	var k := _card_scale()
 	_card_targets.clear()
 	_card_groups.clear()
 	for i in range(slots.size()):
 		var slot: Dictionary = slots[i]
-		var pos := GlassUI.rail_local(frame_outer, size, i)
+		var pos := GlassUI.rail_local(frame_outer, size * k, i)
 		if slot.has("overflow"):
 			var o := GlassUI.card(rail_root, font, pos, size, "+%d more" % int(slot["overflow"]), "", 0.0, false)
 			_card_targets.append({"mesh": o["mesh"], "size": size, "overflow": true})
+			(o["group"] as Node3D).scale = Vector3.ONE * k
 			_card_groups.append(o["group"])
 			continue
 		var c := GlassUI.card(rail_root, font, pos, size, str(slot["key"]),
 				str(slot["state"]), float(slot["attention"]), false)
 		_card_targets.append({"mesh": c["mesh"], "size": size, "key": str(slot["key"])})
+		(c["group"] as Node3D).scale = Vector3.ONE * k
 		_card_groups.append(c["group"])
 		if float(slot["attention"]) > 0.5:
 			waiting_cards.append((c["mesh"] as MeshInstance3D).material_override)
+	_build_buttons(k)
 	if pointers:
 		pointers.set_cards(_card_targets)
+
+
+## New / Close under the window. They ride in the rail's list of pointer
+## targets with reserved keys, so the pointer needs no new gesture.
+func _build_buttons(k: float) -> void:
+	_button_groups.clear()
+	var size := GlassUI.angular_size(GlassUI.BUTTON_W_DEG, GlassUI.BUTTON_H_DEG, distance)
+	var armed := Time.get_ticks_msec() < _close_armed_ms
+	var specs := [["__close", "Confirm?" if armed else "Close", 1.0 if armed else 0.0],
+			["__new", "+ New", 0.0]]
+	for i in range(specs.size()):
+		var b := GlassUI.button(rail_root, font, GlassUI.button_local(frame_outer, size * k, i),
+				size, specs[i][1], specs[i][2])
+		(b["group"] as Node3D).scale = Vector3.ONE * k
+		_button_groups.append(b["group"])
+		_card_targets.append({"mesh": b["mesh"], "size": size, "key": specs[i][0]})
+
+
+func _on_card_selected(key: String) -> void:
+	match key:
+		"__new":
+			client.new_session()
+		"__close":
+			if Time.get_ticks_msec() < _close_armed_ms:
+				_close_armed_ms = 0
+				client.close_session(session)
+			else:
+				# ⛔ Closing kills whatever agent runs there, so one stray trigger
+				# pull must never do it: the first tap only asks.
+				_close_armed_ms = Time.get_ticks_msec() + CLOSE_CONFIRM_MS
+				get_tree().create_timer(CLOSE_CONFIRM_MS / 1000.0 + 0.05).timeout.connect(_rebuild_rail)
+			_rebuild_rail()
+		_:
+			switch_to(key)
+
+
+func _on_session_removed(key: String) -> void:
+	var i := _index_of(key)
+	if i >= 0:
+		known.remove_at(i)
+	if key == session:
+		var next := ""
+		for x in known:
+			next = str(x.get("key", ""))
+			if next != "":
+				break
+		if next != "":
+			switch_to(next)
+		elif grid:
+			grid.clear()
+	_update_status()
+	_rebuild_rail()
 
 
 ## Attention motion: the amber edge breathes on cards that are waiting on you.
@@ -463,6 +524,8 @@ func _apply_config(cfg: Dictionary) -> void:
 	var new_rows := int(p.get("rows", rows))
 	var new_dist := float(p.get("distance_m", distance))
 	var new_pitch := float(p.get("pitch_deg", pitch_deg))
+	var font_changed := _set_font(str(f.get("family", "Iosevka Term")),
+			float(f.get("line_height", 1.25)))
 	_apply_backdrop_config(cfg)
 	if _apply_colors() and frame_mesh:
 		frame_mesh.material_override.set_shader_parameter("body_color", GlassUI.body)
@@ -473,7 +536,7 @@ func _apply_config(cfg: Dictionary) -> void:
 				int(cfg.get("comfort", {}).get("typing_lockout_ms", 1500)))
 		if pairing != null:
 			pointers.enabled = false
-	if is_equal_approx(new_dmm, dmm) and new_cols == cols and new_rows == rows \
+	if not font_changed and is_equal_approx(new_dmm, dmm) and new_cols == cols and new_rows == rows \
 			and is_equal_approx(new_dist, distance) and is_equal_approx(new_pitch, pitch_deg):
 		return
 	dmm = new_dmm
@@ -489,6 +552,28 @@ func _apply_config(cfg: Dictionary) -> void:
 	_rebuild_rail()
 	client.resync(session)
 	print("[term] config reload -> %d cols, %.1f dmm, %.2f m" % [cols, dmm, distance])
+
+
+var _font_key := ""
+
+
+## Load the bundled face `family` names and measure its cell. Returns true when
+## anything changed (the caller rebuilds the panel). ⚠️ Only JetBrains gets a
+## fallback (Iosevka), never the reverse — two fonts falling back to each other
+## is a cycle.
+func _set_font(family: String, line_height: float) -> bool:
+	line_height = clampf(line_height, 1.0, 2.0)
+	var path := GlassUI.font_path(family)
+	var key := "%s@%.3f" % [path, line_height]
+	if key == _font_key:
+		return false
+	_font_key = key
+	font = load(path)
+	if path != GlassUI.FONT_IOSEVKA and font.fallbacks.is_empty():
+		font.fallbacks = [load(GlassUI.FONT_IOSEVKA)]
+	GlassUI.cell = GlassUI.measure_cell(font, line_height)
+	print("[term] font %s, cell %s" % [path.get_file(), GlassUI.cell])
+	return true
 
 
 ## Push the config's resolved colours (atriumd/schemes.py) into the grid and
@@ -778,7 +863,7 @@ func _on_grid_hover(col: int, row: int) -> void:
 	if col < 1 or row < 1:
 		hover_dot.visible = false
 		return
-	var cell := GlassUI.CELL
+	var cell := GlassUI.cell
 	hover_dot.position = Vector2((col - 1) * cell.x, (row - 1) * cell.y)
 	hover_dot.visible = true
 
@@ -789,6 +874,11 @@ func _on_grid_hover(col: int, row: int) -> void:
 ## while the thumbstick is held.
 func _on_focus_resized(factor: float) -> void:
 	_resize_panel(clampf(dmm * factor, 16.0, 40.0))
+
+
+## Card text is drawn at ~22.3 dmm (GlassUI.card); scale it to the window's.
+func _card_scale() -> float:
+	return clampf(dmm / GlassUI.CARD_TEXT_DMM, 0.5, 3.0)
 
 
 func _resize_panel(new_dmm: float) -> void:
@@ -810,12 +900,22 @@ func _resize_panel(new_dmm: float) -> void:
 	var px_per_m := float(viewport.size.y) / term.y * GlassUI.UI_PX_SCALE
 	frame_vp.size = Vector2i(int(round(outer.x * px_per_m)), int(round(outer.y * px_per_m)))
 	_update_status()
-	# Cards keep their size and slide along with the window's edge.
+	# Cards grow with the window, so their text stays the size of the terminal's
+	# ("the card doesn't grow when the window does… looks goofy", 9/17). Scaling
+	# the group keeps the pointer right: hit_quad inverts the global transform.
+	var k := _card_scale()
+	var card_size := GlassUI.angular_size(GlassUI.CARD_W_DEG, GlassUI.CARD_H_DEG, distance)
 	for i in range(_card_groups.size()):
 		var g: Node3D = _card_groups[i]
 		if is_instance_valid(g):
-			var card_size := GlassUI.angular_size(GlassUI.CARD_W_DEG, GlassUI.CARD_H_DEG, distance)
-			g.position = GlassUI.rail_local(outer, card_size, i)
+			g.scale = Vector3.ONE * k
+			g.position = GlassUI.rail_local(outer, card_size * k, i)
+	var button_size := GlassUI.angular_size(GlassUI.BUTTON_W_DEG, GlassUI.BUTTON_H_DEG, distance)
+	for i in range(_button_groups.size()):
+		var g: Node3D = _button_groups[i]
+		if is_instance_valid(g):
+			g.scale = Vector3.ONE * k
+			g.position = GlassUI.button_local(outer, button_size * k, i)
 	_push_pointer_targets()
 	# A bigger window may now reach the floor.
 	_drag_target = focus_group.global_position

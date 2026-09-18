@@ -68,5 +68,17 @@ class TestSchemes(unittest.TestCase):
         self.assertIsNone(schemes.color("rgb(1,2,3)"))
 
 
+
+class TestFont(unittest.TestCase):
+    def test_bundled_families_pass_others_fall_back(self):
+        cfg, notes = load('return { font = { family = "JetBrainsMono Nerd Font" } }')
+        self.assertEqual(notes, [])
+        self.assertEqual(cfg["font"]["family"], "JetBrainsMono Nerd Font")
+        cfg, notes = load('return { font = { family = "Comic Mono", line_height = 9 } }')
+        self.assertEqual(cfg["font"]["family"], "Iosevka Term Medium")
+        self.assertEqual(cfg["font"]["line_height"], 2.0)
+        self.assertEqual(len(notes), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

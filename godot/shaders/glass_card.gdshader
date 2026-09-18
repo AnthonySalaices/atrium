@@ -36,6 +36,13 @@ uniform float gain_rest = 0.38;
 uniform float gain_attention = 1.10;
 uniform float inner_gain = 0.022;
 
+// ⚠️ A 2.5 px amber rim alone was "super subtle, I doubt anyone would notice"
+// (9/17). A card that needs you also grows its rim and floods amber inward
+// from the edge; the text still composites on top, untouched.
+uniform float attention_bezel_scale = 2.4;
+uniform float attention_falloff_scale = 4.0;
+uniform float attention_inner_gain = 0.34;
+
 // ⚠️ A mild bias only. The strongly directional variant (1.60/0.40) was rejected
 // because the bottom edge disappears. If it shimmers on hardware, make it
 // uniform BEFORE making it brighter.
@@ -67,14 +74,17 @@ void fragment() {
 	}
 
 	float u = max(-d, 0.0);                        // depth inward from the silhouette
-	float rim = 1.0 - smoothstep(0.0, bezel_h, u);
-	float inner = exp(-u / falloff_h) * (1.0 - rim);
+	float bz = bezel_h * mix(1.0, attention_bezel_scale, attention);
+	float fo = falloff_h * mix(1.0, attention_falloff_scale, attention);
+	float rim = 1.0 - smoothstep(0.0, bz, u);
+	float inner = exp(-u / fo) * (1.0 - rim);
 	float bias = mix(top_bias, bottom_bias, UV.y); // UV.y is down in Godot
 
 	vec3 edge = mix(edge_rest.rgb, edge_attention.rgb, attention);
 	float gain = mix(gain_rest, gain_attention, attention);
 
-	vec3 rgb = body_color.rgb + edge * (rim * gain * bias + inner * inner_gain);
+	float ig = mix(inner_gain, attention_inner_gain * gain, attention);
+	vec3 rgb = body_color.rgb + edge * (rim * gain * bias + inner * ig);
 	float a = mix(body_alpha, edge_alpha, rim);
 
 	// ⛔ Text composites LAST, at its own coverage, with opaque glyph interiors.

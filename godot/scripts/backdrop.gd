@@ -375,7 +375,7 @@ func _start_loops(root: Node) -> void:
 			continue
 		var anim_root: Node = ap.get_node(ap.root_node)
 		for i in range(names.size()):
-			var anim: Animation = ap.get_animation(names[i])
+			var anim: Animation = _only_moving(ap.get_animation(names[i]))
 			anim.loop_mode = Animation.LOOP_LINEAR
 			var player: AnimationPlayer = ap
 			if i > 0:
@@ -386,8 +386,33 @@ func _start_loops(root: Node) -> void:
 				anim_root.add_child(player)
 				player.root_node = player.get_path_to(anim_root)
 				player.add_animation_library("", lib)
+			else:
+				ap.get_animation_library("").add_animation(names[i], anim)
 			player.play(names[i])
 			_players.append(player)
+
+
+## A copy of `anim` without the tracks that never change.
+##
+## ⛔ Godot's glTF import gives EVERY clip a track for EVERY node any clip
+## animates (40 here), holding the ones it does not move at rest. With one
+## player per clip, all eleven write every node each frame and the last one
+## wins — so the café stood frozen: people, fan, clock and clouds (9/17).
+## A clip keeps only what it actually moves, and the players stop fighting.
+static func _only_moving(anim: Animation) -> Animation:
+	var a: Animation = anim.duplicate(true)
+	for t in range(a.get_track_count() - 1, -1, -1):
+		var n := a.track_get_key_count(t)
+		var moving := false
+		if n > 1:
+			var v0 = a.track_get_key_value(t, 0)
+			for k in range(1, n):
+				if a.track_get_key_value(t, k) != v0:
+					moving = true
+					break
+		if not moving:
+			a.remove_track(t)
+	return a
 
 
 ## ⚠️ The room's lighting is BAKED INTO VERTEX COLOURS and its material is

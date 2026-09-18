@@ -12,6 +12,7 @@ file restyles the live panels without a rebuild or a reinstall.
 import hashlib
 import json
 import os
+import re
 import subprocess
 
 import schemes
@@ -122,6 +123,19 @@ def validate(cfg):
         note("font.size_dmm clamped to %g (legible range is %g-%g dmm)"
              % (v, FONT_DMM_MIN, FONT_DMM_MAX))
     font["size_dmm"] = v
+    fam = font.get("family")
+    if not isinstance(fam, str) or not fam.strip():
+        fam = "Iosevka Term Medium"
+    key = fam.lower().replace(" ", "")
+    if "jetbrains" not in key and "iosevka" not in key:
+        note("font.family %r is not bundled (Iosevka Term, JetBrainsMono Nerd Font) — "
+             "using Iosevka Term" % fam)
+        fam = "Iosevka Term Medium"
+    font["family"] = fam
+    v, changed = _clamp(font.get("line_height"), 1.0, 2.0, 1.25)
+    if changed:
+        note("font.line_height clamped to %g" % v)
+    font["line_height"] = v
 
     # ── panels ──────────────────────────────────────────────────────────────
     panels = cfg.setdefault("panels", {})
@@ -285,6 +299,18 @@ def validate(cfg):
     if bad:
         note("sessions.pin_exclude: %d non-string entries ignored" % len(bad))
     sess["pin_exclude"] = [x for x in pe if isinstance(x, str)]
+    new = sess.get("new")
+    if not isinstance(new, dict):
+        note("sessions.new must be a table — using defaults")
+        new = {}
+    new["enabled"] = new.get("enabled", True) is not False
+    for key, dflt in (("command", "claude"), ("prefix", "cc"), ("cwd", "~")):
+        if not isinstance(new.get(key), str) or not new.get(key).strip():
+            new[key] = dflt
+    if not re.match(r"^[A-Za-z0-9_.-]{1,40}$", new["prefix"]):
+        note("sessions.new.prefix %r is not a valid tmux session name — using 'cc'" % new["prefix"])
+        new["prefix"] = "cc"
+    sess["new"] = new
 
     return notes
 

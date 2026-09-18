@@ -203,7 +203,11 @@ return {
   -- FONT
   ----------------------------------------------------------------------------
   font = {
-    family = "Iosevka Term Medium",   -- 0.5-em advance: ~20% more columns per degree
+    -- Bundled: "Iosevka Term" (0.5-em advance: ~20% more columns per degree)
+    -- and "JetBrainsMono Nerd Font" (0.6 em, with the Nerd Font icons a
+    -- starship/powerline prompt uses). The same 80 columns come out ~20% wider
+    -- in JetBrains Mono at the same size_dmm, exactly as they would in WezTerm.
+    family = "Iosevka Term Medium",
     size_dmm = 22.3,                  -- floor is 18 and it is enforced, not advisory
     line_height = 1.25,
     weight = "medium",
@@ -263,6 +267,16 @@ return {
     -- the headset shows the bottom-left crop of the desktop-sized pane
     -- instead. Same as `atrium pin off` inside a session, but permanent.
     pin_exclude = {},             -- Python regexes, e.g. { "^cc-1$", "desk" }
+
+    -- The "New" button under the window. What it runs is decided HERE, on the
+    -- host; the headset can only ask for "a new one". "Close" kills the tmux
+    -- session you are looking at (two taps: the first one asks to confirm).
+    new = {
+      enabled = true,
+      command = "claude",         -- e.g. "codex", "aider", "bash"
+      prefix = "cc",              -- sessions are named cc, cc-2, cc-3 …
+      cwd = "~",
+    },
   },
 
   ----------------------------------------------------------------------------

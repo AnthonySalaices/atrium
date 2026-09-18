@@ -115,7 +115,7 @@ func _build_focus_panel(eye: Node3D) -> Dictionary:
 	var group := GlassUI.oriented_group(eye,
 			GlassUI.polar(GlassUI.FOCUS_YAW_DEG, GlassUI.FOCUS_ELEV_DEG, PANEL_DIST))
 
-	var px_per_m := float(ROWS * GlassUI.CELL.y) / term.y * GlassUI.UI_PX_SCALE
+	var px_per_m := float(ROWS * GlassUI.cell.y) / term.y * GlassUI.UI_PX_SCALE
 	var oh := outer.y * px_per_m
 	var title_vp := GlassUI.content_viewport(self,
 			Vector2i(int(round(outer.x * px_per_m)), int(round(oh))), false)
@@ -141,12 +141,12 @@ func _build_focus_panel(eye: Node3D) -> Dictionary:
 	return {"group": group, "outer": outer}
 
 	var vp := SubViewport.new()
-	vp.size = Vector2i(COLS * GlassUI.CELL.x, ROWS * GlassUI.CELL.y)
+	vp.size = Vector2i(COLS * GlassUI.cell.x, ROWS * GlassUI.cell.y)
 	vp.transparent_bg = true
 	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	add_child(vp)
 	var grid := CellGrid.new()
-	grid.configure(COLS, ROWS, font, GlassUI.FONT_PX, GlassUI.CELL)
+	grid.configure(COLS, ROWS, font, GlassUI.FONT_PX, GlassUI.cell)
 	grid.bg_default = GlassUI.BODY
 	vp.add_child(grid)
 	_load_sample(grid)

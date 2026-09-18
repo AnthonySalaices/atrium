@@ -14,7 +14,26 @@ class_name GlassUI
 const GLASS_SHADER := preload("res://shaders/glass_card.gdshader")
 
 const FONT_PX := 32                 # 22.3 dmm <-> 32 px on the terminal surface
-const CELL := Vector2i(16, 40)
+const CELL := Vector2i(16, 40)       # Iosevka Term at FONT_PX, line height 1.25
+## The live cell: measured from the configured font (measure_cell). A wider
+## font makes a wider window at the same text size, as it would in WezTerm.
+static var cell := CELL
+
+# Bundled faces, picked by `font.family`. Anything else falls back to Iosevka.
+const FONT_IOSEVKA := "res://fonts/IosevkaTerm-Medium.ttf"
+const FONT_JETBRAINS := "res://fonts/JetBrainsMonoNerdFontMono-Regular.ttf"
+
+
+static func font_path(family: String) -> String:
+	return FONT_JETBRAINS if family.to_lower().replace(" ", "").contains("jetbrains") \
+			else FONT_IOSEVKA
+
+
+## One cell of `font` at FONT_PX: its monospace advance by the configured line
+## height. Iosevka at 1.25 gives exactly the historical 16x40.
+static func measure_cell(font: Font, line_height: float) -> Vector2i:
+	var adv := font.get_char_size("M".unicode_at(0), FONT_PX).x
+	return Vector2i(maxi(1, roundi(adv)), maxi(1, roundi(FONT_PX * line_height)))
 
 # ── Layout. ⛔ Not preferences: a centred 51° focus plus a 15° card needs ~33°
 # of centre separation BEFORE any gutter, so focus-at-0 / rail-at-−34° had about
@@ -47,6 +66,7 @@ const BASELINE_SECONDARY_H := 0.242    # below centre
 const UI_PX_SCALE := 0.7
 const TITLE_PX := 28                   # 40 * UI_PX_SCALE
 const CARD_H_PX := 168                 # reference card is 329x120; ~1.4x the eye buffer
+const CARD_TEXT_DMM := 22.3            # the card title's size at CARD_H_DEG; cards scale from it
 
 # Focus frame tokens. ⚠️ Size-aware on purpose: the session card's .100h radius
 # on a 1.26 m panel would carve away usable terminal grid.
@@ -66,8 +86,9 @@ static var body := BODY
 # Attention motion: the edge gain breathes between these at this rate, never to
 # zero, and only while the card is actually waiting on you.
 const PULSE_HZ := 0.5
-const PULSE_GAIN_LO := 0.85
-const PULSE_GAIN_HI := 1.10
+# ⚠️ Was 0.85..1.10 — too shallow to read as motion in the periphery.
+const PULSE_GAIN_LO := 0.55
+const PULSE_GAIN_HI := 1.45
 
 # States that count as "waiting on you" — mirrors atriumd/focus.py.
 const WAITING_STATES := ["needs-input", "error", "done"]
@@ -88,10 +109,10 @@ static func title_right_text(waiting: int, crop: Vector2i) -> String:
 ## dmm is the FONT size, so the angular width is cols * cell.x * (dmm / font_px)
 ## milliradians. ⚠️ Dividing by cell.x instead makes every panel exactly 2x too big.
 static func term_size(cols: int, rows: int, dmm: float, dist: float) -> Vector2:
-	var vp_w := cols * CELL.x
+	var vp_w := cols * cell.x
 	var ang := (dmm / float(FONT_PX)) * float(vp_w) / 1000.0
 	var w := 2.0 * dist * tan(ang * 0.5)
-	return Vector2(w, w * float(rows * CELL.y) / float(vp_w))
+	return Vector2(w, w * float(rows * cell.y) / float(vp_w))
 
 
 static func polar(yaw_deg: float, elev_deg: float, dist: float) -> Vector3:
@@ -213,6 +234,41 @@ static func card(parent: Node, font: Font, pos: Vector3, size: Vector2, title: S
 	params["content"] = vp.get_texture()
 	var mesh := glass(group, size, Vector3.ZERO, params)
 	return {"mesh": mesh, "viewport": vp, "group": group}
+
+
+## A small glass button: one centred label, same glass as a card. Sized at
+## BUTTON_H_DEG with the card's pixel density, so its label is card-sized text.
+const BUTTON_W_DEG := 7.0
+const BUTTON_H_DEG := 3.0
+const BUTTON_GAP_M := 0.02
+
+
+static func button(parent: Node, font: Font, pos: Vector3, size: Vector2, label: String,
+		attention: float) -> Dictionary:
+	var h_px := float(CARD_H_PX) * BUTTON_H_DEG / CARD_H_DEG
+	var w_px := h_px * size.x / size.y
+	var vp := content_viewport(parent, Vector2i(int(round(w_px)), int(round(h_px))), true)
+	var px := 39
+	var w := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, px).x
+	var color := AMBER if attention > 0.5 else TEXT_PRIMARY
+	var baseline := h_px * 0.5 + (font.get_ascent(px) - font.get_descent(px)) * 0.5
+	baseline_label(vp, font, label, px, color, (w_px - w) * 0.5, baseline)
+	var group := Node3D.new()
+	group.position = pos
+	parent.add_child(group)
+	var params := CARD_TOKENS.duplicate()
+	params["attention"] = attention
+	params["content"] = vp.get_texture()
+	params["body_color"] = body
+	var mesh := glass(group, size, Vector3.ZERO, params)
+	return {"mesh": mesh, "viewport": vp, "group": group}
+
+
+## Where button i sits (0 = rightmost), under the frame's bottom-right corner.
+static func button_local(outer: Vector2, b: Vector2, i: int) -> Vector3:
+	var frame_bottom := FRAME_TITLE_M * 0.5 - outer.y * 0.5
+	return Vector3(outer.x * 0.5 - b.x * 0.5 - float(i) * (b.x + BUTTON_GAP_M),
+			frame_bottom - RAIL_VGAP_M - b.y * 0.5, -0.004)
 
 
 ## Which sessions go in which rail slot.
