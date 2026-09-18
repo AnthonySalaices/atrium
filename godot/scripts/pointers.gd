@@ -61,6 +61,21 @@ var allow_scroll := true
 var show_ray := true
 var scroll_lines_per_s := 14.0
 var typing_lockout_ms := 1500
+## Hands at all (ctrl+alt+H flips it; config pointer.hands). Controllers are
+## never affected by any of the hand rules below.
+var hands_enabled := true
+
+# ⚠️ Hands resting on a keyboard "went wild" (9/17): rays flailing, the hover
+# jumping, stray pinches. Three rules for TRACKED HANDS only:
+#  1. typing silences them completely for typing_lockout_ms (no ray, no hover);
+#  2. a hand must be RAISED to point — near head height and not aimed at the
+#     desk — with hysteresis so it does not flicker at the edge;
+#  3. a pinch counts only once held PINCH_HOLD_MS, so fingers brushing between
+#     keystrokes never click.
+const RAISE_ON_M := 0.42       # hand within this far below the eyes -> active
+const RAISE_OFF_M := 0.52      # ...and stays active until it drops below this
+const AIM_MIN_Y := -0.5        # aim more than ~30 deg down = pointing at the desk
+const PINCH_HOLD_MS := 150
 
 # Targets. The frame is one quad in the focus group's local space; its top
 # `title_h` metres are the strip you drag by, the rest maps onto the grid.
@@ -117,7 +132,7 @@ func _new_hand(c: XRController3D, side: String) -> Dictionary:
 		"ctrl": c, "side": side, "ray": ray, "dot": dot,
 		"pressed": false, "gripped": false, "mode": "", "target": {}, "press_t": 0.0,
 		"grab_dist": 0.0, "grab_offset": Vector3.ZERO, "press_local_y": 0.0,
-		"scroll_acc": 0.0, "hit": {},
+		"scroll_acc": 0.0, "hit": {}, "raised": false, "pinch_since": -1,
 	}
 
 
@@ -147,6 +162,7 @@ func set_config(p: Dictionary, lockout_ms: int) -> void:
 	allow_scroll = bool(p.get("scroll", true))
 	show_ray = bool(p.get("show_ray", true))
 	scroll_lines_per_s = float(p.get("scroll_lines_per_s", 14.0))
+	hands_enabled = bool(p.get("hands", true))
 	typing_lockout_ms = lockout_ms
 	if not enabled:
 		for h in _hands:
@@ -157,6 +173,35 @@ func set_config(p: Dictionary, lockout_ms: int) -> void:
 ## The keyboard just sent something to a pane.
 func note_typing() -> void:
 	_typed_ms = Time.get_ticks_msec()
+
+
+## ctrl+alt+H. Returns the new state.
+func toggle_hands() -> bool:
+	hands_enabled = not hands_enabled
+	return hands_enabled
+
+
+## Rules 1 and 2 for one tracked hand this frame. `head_y` = eye height.
+func hand_allowed(h: Dictionary, hand_y: float, aim_y: float, head_y: float, now_ms: int) -> bool:
+	if not hands_enabled or (now_ms - _typed_ms) < typing_lockout_ms:
+		h["raised"] = false
+		return false
+	if h["mode"] != "":
+		return true                # a gesture in progress may go low (drag down)
+	var below := head_y - hand_y
+	var raised: bool = below < (RAISE_OFF_M if h["raised"] else RAISE_ON_M) and aim_y > AIM_MIN_Y
+	h["raised"] = raised
+	return raised
+
+
+## Rule 3: the pinch as the gestures should see it.
+func deliberate_pinch(h: Dictionary, pinched: bool, now_ms: int) -> bool:
+	if not pinched:
+		h["pinch_since"] = -1
+		return false
+	if int(h["pinch_since"]) < 0:
+		h["pinch_since"] = now_ms
+	return now_ms - int(h["pinch_since"]) >= PINCH_HOLD_MS
 
 
 ## A target that was freed mid-gesture must not be touched again — but a
@@ -194,8 +239,23 @@ func _process(delta: float) -> void:
 			continue
 		var t := c.global_transform
 		var stick := c.get_vector2("primary")
-		var cell := step(h, t.origin, -t.basis.z, c.is_button_pressed("trigger_click"),
-				stick, delta, _is_hand(c), c.is_button_pressed("grip_click"))
+		var pressed := c.is_button_pressed("trigger_click")
+		var is_hand := _is_hand(c)
+		if is_hand:
+			var now := Time.get_ticks_msec()
+			var cam := get_viewport().get_camera_3d()
+			var head_y := cam.global_position.y if cam else t.origin.y
+			if not hand_allowed(h, t.origin.y, (-t.basis.z).y, head_y, now):
+				if h["mode"] != "":
+					_end_gesture(h)
+				h["pinch_since"] = -1
+				h["pressed"] = false
+				h["gripped"] = false
+				_hide(h)
+				continue
+			pressed = deliberate_pinch(h, pressed, now)
+		var cell := step(h, t.origin, -t.basis.z, pressed,
+				stick, delta, is_hand, c.is_button_pressed("grip_click"))
 		if cell.x > 0:
 			hover = cell
 	if hover != _hover_cell:

@@ -811,6 +811,17 @@ func _update_status() -> void:
 	frame_vp.render_target_update_mode = SubViewport.UPDATE_ONCE
 
 
+## A short note on the title strip's right end, then back to the usual status.
+func _flash(text: String) -> void:
+	if title_right == null:
+		return
+	title_right.text = text
+	var w := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, GlassUI.TITLE_PX).x
+	title_right.position.x = float(frame_vp.size.x) - w - 60.0
+	frame_vp.render_target_update_mode = SubViewport.UPDATE_ONCE
+	get_tree().create_timer(2.0).timeout.connect(_update_status)
+
+
 ## Show a different session on the focus panel.
 func switch_to(key: String) -> void:
 	if key == "" or key == session:
@@ -888,6 +899,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 				return
 			KEY_SPACE:
 				jump_to_glow()
+				return
+			KEY_H:
+				if pointers:
+					_flash("hands on" if pointers.toggle_hands() else "hands off")
 				return
 	# ⛔ While the pairing card is up, every key belongs to it. Nothing typed
 	# there may reach a tmux pane.

@@ -201,3 +201,25 @@ func _run() -> void:
 	ptr.set_frame(frame2, outer, title_h, term, cols, rows)
 	check(h["mode"] == "" and got == [["drag_end"]], "a NEW frame mesh ends the gesture cleanly", str(got))
 	ptr.step(h, eye, sdir, false, Vector2.ZERO, 0.016, false)
+
+	# ── Hands near a keyboard (9/17: "the hand control goes wild when typing").
+	var hh := ptr._new_hand(null, "test")
+	var head := 1.20
+	var t0 := 100000
+	ptr._typed_ms = -100000
+	check(not ptr.hand_allowed(hh, head - 0.60, -0.3, head, t0), "a hand low at the keyboard gets no ray")
+	check(not ptr.hand_allowed(hh, head - 0.30, -0.8, head, t0), "a raised hand aimed at the desk gets no ray")
+	check(ptr.hand_allowed(hh, head - 0.30, -0.1, head, t0), "a raised hand aimed at the windows points")
+	check(ptr.hand_allowed(hh, head - 0.47, -0.1, head, t0), "hysteresis: it stays active a little lower")
+	check(not ptr.hand_allowed(hh, head - 0.55, -0.1, head, t0), "...until it drops well below")
+	ptr._typed_ms = t0 - 200
+	check(not ptr.hand_allowed(hh, head - 0.30, -0.1, head, t0), "typing silences even a raised hand")
+	ptr._typed_ms = -100000
+	ptr.hands_enabled = false
+	check(not ptr.hand_allowed(hh, head - 0.30, -0.1, head, t0), "ctrl+alt+H off: no hands at all")
+	ptr.hands_enabled = true
+	check(not ptr.deliberate_pinch(hh, true, t0), "a pinch does not count at once")
+	check(not ptr.deliberate_pinch(hh, true, t0 + 100), "...nor after 100 ms")
+	check(ptr.deliberate_pinch(hh, true, t0 + 160), "...but does once held 150 ms")
+	check(not ptr.deliberate_pinch(hh, false, t0 + 170), "letting go releases at once")
+	check(not ptr.deliberate_pinch(hh, true, t0 + 180), "and the next pinch starts its own clock")

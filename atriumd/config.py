@@ -218,7 +218,7 @@ def validate(cfg):
         note("pointer must be a table — using defaults")
         ptr = {}
         cfg["pointer"] = ptr
-    for key in ("enabled", "select", "drag", "scroll", "show_ray"):
+    for key in ("enabled", "select", "drag", "scroll", "show_ray", "hands"):
         v = ptr.get(key, True)
         if not isinstance(v, bool):
             note("pointer.%s must be true/false — using true" % key)
