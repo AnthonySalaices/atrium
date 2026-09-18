@@ -18,6 +18,7 @@ var session := SESSION_FALLBACK
 const HOST_FALLBACK := "127.0.0.1"
 
 var rig: Node3D
+var xr_origin: XROrigin3D
 var cam: XRCamera3D
 var client: GlassClient
 var grid: CellGrid
@@ -102,6 +103,7 @@ func _ready() -> void:
 
 	var origin := XROrigin3D.new()
 	add_child(origin)
+	xr_origin = origin
 	cam = XRCamera3D.new()
 	origin.add_child(cam)
 	rig = Node3D.new()
@@ -109,9 +111,6 @@ func _ready() -> void:
 
 	_build_backdrop()
 	_build_panel()
-	rail_root = Node3D.new()
-	rig.add_child(rail_root)
-
 	# Controllers / hands. ⚠️ Must be a child of the XROrigin3D, not the rig:
 	# tracker poses are origin-relative and the rig moves on every recentre.
 	pointers = Pointers.new()
@@ -387,6 +386,9 @@ func _build_panel() -> void:
 	params["content"] = frame_vp.get_texture()
 	frame_mesh = GlassUI.glass(focus_group, outer, Vector3(0, title_h * 0.5, -0.004), params)
 	frame_outer = outer
+	# The rail lives INSIDE the focus group so it moves and resizes with it.
+	rail_root = Node3D.new()
+	focus_group.add_child(rail_root)
 
 	# ⚠️ Quad, not cylinder: the cylinder layer did not follow the rig between
 	# rooms on 2026-09-15 and that is still unexplained. Quad is proven.
@@ -413,19 +415,21 @@ func _rebuild_rail() -> void:
 		c.queue_free()
 	waiting_cards.clear()
 	var slots := GlassUI.rail_slots(known, session, focus_key)
-	var size := GlassUI.angular_size(GlassUI.CARD_W_DEG, GlassUI.CARD_H_DEG, GlassUI.RAIL_DIST)
+	var size := GlassUI.angular_size(GlassUI.CARD_W_DEG, GlassUI.CARD_H_DEG, distance)
 	_card_targets.clear()
+	_card_groups.clear()
 	for i in range(slots.size()):
 		var slot: Dictionary = slots[i]
-		var pos := GlassUI.polar(GlassUI.RAIL_YAW_DEG, float(GlassUI.RAIL_ELEV_DEG[i]),
-				GlassUI.RAIL_DIST)
+		var pos := GlassUI.rail_local(frame_outer, size, i)
 		if slot.has("overflow"):
-			var o := GlassUI.card(rail_root, font, pos, size, "+%d more" % int(slot["overflow"]), "", 0.0)
+			var o := GlassUI.card(rail_root, font, pos, size, "+%d more" % int(slot["overflow"]), "", 0.0, false)
 			_card_targets.append({"mesh": o["mesh"], "size": size, "overflow": true})
+			_card_groups.append(o["group"])
 			continue
 		var c := GlassUI.card(rail_root, font, pos, size, str(slot["key"]),
-				str(slot["state"]), float(slot["attention"]))
+				str(slot["state"]), float(slot["attention"]), false)
 		_card_targets.append({"mesh": c["mesh"], "size": size, "key": str(slot["key"])})
+		_card_groups.append(c["group"])
 		if float(slot["attention"]) > 0.5:
 			waiting_cards.append((c["mesh"] as MeshInstance3D).material_override)
 	if pointers:
@@ -683,6 +687,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 var _pointer_cfg := {}
 var _card_targets: Array = []
+var _card_groups: Array = []
 
 
 func _push_pointer_targets() -> void:
@@ -704,13 +709,43 @@ func _place_focus(local_pos: Vector3) -> void:
 		focus_group.rotate_object_local(Vector3.UP, PI)
 
 
+var _drag_target := Vector3.ZERO
+var _drag_pending := false
+const FLOOR_CLEAR_M := 0.05
+const WALL_CLEAR_M := 0.15
+
+
 func _on_focus_dragged(world_pos: Vector3) -> void:
-	if focus_group == null or rig == null:
+	# Applied in _physics_process, where the space state is safe to query.
+	_drag_target = world_pos
+	_drag_pending = true
+
+
+## ⭐ Collision (owner 9/17 eve): a window cannot go through the floor or a
+## wall. Floor = the tracking origin's plane (local-floor space). Walls = the
+## room's static geometry, which backdrop.gd gives trimesh collision, tested
+## with one ray from the head to where the window wants to be.
+func _physics_process(_delta: float) -> void:
+	if not _drag_pending or focus_group == null or rig == null or cam == null:
 		return
-	var local := rig.to_local(world_pos)
-	# Keep it in front and off the floor; the pointer already bounds distance.
-	if local.length() < 0.3:
+	_drag_pending = false
+	var pos := _drag_target
+	var from := cam.global_position
+	var dir := pos - from
+	if dir.length() < 0.3:
 		return
+	var space := get_world_3d().direct_space_state
+	if space != null:
+		var q := PhysicsRayQueryParameters3D.create(from, pos + dir.normalized() * WALL_CLEAR_M)
+		var hit := space.intersect_ray(q)
+		if not hit.is_empty():
+			var d := maxf(from.distance_to(hit["position"]) - WALL_CLEAR_M, 0.3)
+			pos = from + dir.normalized() * d
+	if xr_origin != null:
+		var floor_y: float = xr_origin.global_position.y
+		var half_h := frame_outer.y * 0.5 + GlassUI.FRAME_TITLE_M * 0.5
+		pos.y = maxf(pos.y, floor_y + FLOOR_CLEAR_M + half_h)
+	var local := rig.to_local(pos)
 	_focus_override = local
 	_place_focus(local)
 
@@ -753,4 +788,13 @@ func _resize_panel(new_dmm: float) -> void:
 	var px_per_m := float(viewport.size.y) / term.y * GlassUI.UI_PX_SCALE
 	frame_vp.size = Vector2i(int(round(outer.x * px_per_m)), int(round(outer.y * px_per_m)))
 	_update_status()
+	# Cards keep their size and slide along with the window's edge.
+	for i in range(_card_groups.size()):
+		var g: Node3D = _card_groups[i]
+		if is_instance_valid(g):
+			var card_size := GlassUI.angular_size(GlassUI.CARD_W_DEG, GlassUI.CARD_H_DEG, distance)
+			g.position = GlassUI.rail_local(outer, card_size, i)
 	_push_pointer_targets()
+	# A bigger window may now reach the floor.
+	_drag_target = focus_group.global_position
+	_drag_pending = true

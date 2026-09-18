@@ -21,10 +21,16 @@ const CELL := Vector2i(16, 40)
 # 1° of clearance. Focus +6° / rail −30° buys ~3° and keeps the rail near gaze.
 const FOCUS_YAW_DEG := 6.0
 const FOCUS_ELEV_DEG := -10.0
-const RAIL_YAW_DEG := -30.0
+const RAIL_YAW_DEG := -30.0            # (history: the rail's own polar place, pre-9/17)
 const RAIL_DIST := 1.55
 # 5.5° cards with 1.5° clear gaps. Slot 0 is RESERVED for whoever needs you.
 const RAIL_ELEV_DEG := [3.0, -4.0, -11.0, -18.0]
+# ⭐ 9/17 eve (owner): the rail is ATTACHED to the focus window — it hangs off the
+# window's left edge in the window's own plane, so dragging or resizing the
+# window carries the cards with it. Gaps in metres at the window's distance.
+const RAIL_SLOTS := 4
+const RAIL_GAP_M := 0.06               # window edge -> card edge
+const RAIL_VGAP_M := 0.035             # between cards
 const CARD_W_DEG := 15.0
 const CARD_H_DEG := 5.5
 
@@ -115,6 +121,15 @@ static func oriented_group(parent: Node, pos: Vector3) -> Node3D:
 	return g
 
 
+## Where rail card `i` sits in the focus group's local space, given the frame's
+## outer size and the card size: to the left of the frame, top-aligned with it,
+## in the frame's own plane (z = -0.004, the same 4 mm behind the layer).
+static func rail_local(outer: Vector2, card: Vector2, i: int) -> Vector3:
+	var frame_top := FRAME_TITLE_M * 0.5 + outer.y * 0.5
+	return Vector3(-(outer.x * 0.5 + RAIL_GAP_M + card.x * 0.5),
+			frame_top - card.y * 0.5 - float(i) * (card.y + RAIL_VGAP_M), -0.004)
+
+
 ## A glass quad in a group's local space. Returns the mesh so a caller can drive
 ## `attention` / `gain_attention` on its material later.
 static func glass(parent: Node3D, size: Vector2, local_pos: Vector3,
@@ -165,8 +180,10 @@ static func content_viewport(parent: Node, size: Vector2i, once: bool) -> SubVie
 
 ## One session card: title + state word on variant-C glass. Returns
 ## {"mesh": MeshInstance3D, "viewport": SubViewport}.
+## `aim` = true turns the card to face the parent's origin (the old free-floating
+## rail); false places it flat at `pos` in the parent's space (attached rail).
 static func card(parent: Node, font: Font, pos: Vector3, size: Vector2, title: String,
-		state: String, attention: float) -> Dictionary:
+		state: String, attention: float, aim: bool = true) -> Dictionary:
 	var h_px := float(CARD_H_PX)
 	var vp := content_viewport(parent, Vector2i(int(round(h_px * size.x / size.y)), int(h_px)), true)
 	var inset := TEXT_INSET_H * h_px
@@ -180,7 +197,13 @@ static func card(parent: Node, font: Font, pos: Vector3, size: Vector2, title: S
 		# state that actually wants you.
 		baseline_label(vp, font, state, secondary_px, TEXT_SECONDARY,
 				inset, h_px * 0.5 + BASELINE_SECONDARY_H * h_px)
-	var group := oriented_group(parent, pos)
+	var group: Node3D
+	if aim:
+		group = oriented_group(parent, pos)
+	else:
+		group = Node3D.new()
+		group.position = pos
+		parent.add_child(group)
 	var params := CARD_TOKENS.duplicate()
 	params["attention"] = attention
 	params["content"] = vp.get_texture()

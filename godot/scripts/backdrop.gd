@@ -233,7 +233,9 @@ func _install_room(node: Node3D, kind: String) -> void:
 	room.transform = _anchor
 	add_child(room)
 	_fix_materials(room)
+	var n := _add_collision(room)
 	_start_loops(room)
+	print("[backdrop] collision on %d static mesh(es)" % n)
 	print("[backdrop] %s room loaded: %d animation loop(s)" % [kind, _players.size()])
 
 
@@ -393,6 +395,19 @@ func _start_loops(root: Node) -> void:
 ## not turn on "vertex colour as albedo", so the whole café rendered pure white
 ## the first time — every wall, every patron. Force it here rather than depend
 ## on an import setting that a fresh checkout would not have.
+## Static meshes get a concave collision shape so a dragged window can be
+## stopped at a wall (terminal.gd raycasts against it). Skinned meshes — the
+## patrons — are skipped: they move, and nobody drags a window into a person.
+func _add_collision(n: Node) -> int:
+	var count := 0
+	if n is MeshInstance3D and n.mesh and (n as MeshInstance3D).skeleton == NodePath():
+		(n as MeshInstance3D).create_trimesh_collision()
+		count += 1
+	for c in n.get_children():
+		count += _add_collision(c)
+	return count
+
+
 func _fix_materials(n: Node) -> void:
 	if n is MeshInstance3D and n.mesh:
 		for i in range(n.mesh.get_surface_count()):

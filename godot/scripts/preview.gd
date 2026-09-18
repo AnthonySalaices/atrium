@@ -93,9 +93,9 @@ func _ready() -> void:
 	backdrop.apply({"mode": "default", "default": {"preset": _arg_value("--backdrop", "nebula")}})
 	note("backdrop %s" % backdrop.preset)
 
-	_build_focus_panel(eye)
+	var panel := _build_focus_panel(eye)
 	note("focus panel built")
-	_build_rail(eye)
+	_build_rail(panel["group"], panel["outer"])
 	note("rail built")
 
 
@@ -107,7 +107,7 @@ func _arg_value(flag: String, fallback: String) -> String:
 
 ## The same construction as terminal.gd, except the grid is a textured quad
 ## inside the frame instead of a composition layer.
-func _build_focus_panel(eye: Node3D) -> void:
+func _build_focus_panel(eye: Node3D) -> Dictionary:
 	var term := GlassUI.term_size(COLS, ROWS, DMM, PANEL_DIST)
 	var pad := GlassUI.FRAME_PAD_M
 	var title_h := GlassUI.FRAME_TITLE_M
@@ -138,6 +138,7 @@ func _build_focus_panel(eye: Node3D) -> void:
 	frame["attention"] = 0.0
 	frame["content"] = title_vp.get_texture()
 	GlassUI.glass(group, outer, Vector3(0, title_h * 0.5, -0.004), frame)
+	return {"group": group, "outer": outer}
 
 	var vp := SubViewport.new()
 	vp.size = Vector2i(COLS * GlassUI.CELL.x, ROWS * GlassUI.CELL.y)
@@ -181,18 +182,17 @@ func _load_sample(grid: CellGrid) -> void:
 	grid.apply_frame({"cols": COLS, "rows": ROWS, "base": 0, "lines": rows_out})
 
 
-func _build_rail(eye: Node3D) -> void:
+func _build_rail(group: Node3D, outer: Vector2) -> void:
 	var slots := GlassUI.rail_slots(FAKE, FAKE_CURRENT, FAKE_FOCUS)
-	var size := GlassUI.angular_size(GlassUI.CARD_W_DEG, GlassUI.CARD_H_DEG, GlassUI.RAIL_DIST)
+	var size := GlassUI.angular_size(GlassUI.CARD_W_DEG, GlassUI.CARD_H_DEG, PANEL_DIST)
 	for i in range(slots.size()):
 		var slot: Dictionary = slots[i]
-		var pos := GlassUI.polar(GlassUI.RAIL_YAW_DEG, float(GlassUI.RAIL_ELEV_DEG[i]),
-				GlassUI.RAIL_DIST)
+		var pos := GlassUI.rail_local(outer, size, i)
 		if slot.has("overflow"):
-			GlassUI.card(eye, font, pos, size, "+%d more" % int(slot["overflow"]), "", 0.0)
+			GlassUI.card(group, font, pos, size, "+%d more" % int(slot["overflow"]), "", 0.0, false)
 		else:
-			GlassUI.card(eye, font, pos, size, str(slot["key"]), str(slot["state"]),
-					float(slot["attention"]))
+			GlassUI.card(group, font, pos, size, str(slot["key"]), str(slot["state"]),
+					float(slot["attention"]), false)
 
 
 func _process(_d: float) -> void:
