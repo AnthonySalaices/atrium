@@ -12,6 +12,10 @@ config/features=PackedStringArray("4.7", "Mobile")
 
 renderer/rendering_method="mobile"
 renderer/rendering_method.mobile="mobile"
+; 4x MSAA: the owner's first words on the café were "the lines are pixelated on all the
+; edges" (9/17 eve). Geometry edges alias hard at 25 PPD; the mobile renderer resolves MSAA
+; in tile memory so it is close to free. The terminal layer is unaffected either way.
+anti_aliasing/quality/msaa_3d=2
 textures/vram_compression/import_etc2_astc=true
 
 [xr]
