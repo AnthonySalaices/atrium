@@ -213,3 +213,29 @@ class LupaParity(unittest.TestCase):
         os.unlink(f.name)
         self.assertEqual(a, b)
         self.assertIn('"ok":false', a)
+
+
+class TestPointer(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def test_defaults(self):
+        cfg, _ = config.evaluate("")
+        self.assertEqual(config.validate(cfg), [])       # defaults never need clamping
+        self.assertEqual(cfg["pointer"]["enabled"], True)
+        self.assertEqual(cfg["pointer"]["scroll_lines_per_s"], 14)
+        self.assertEqual(cfg["comfort"]["typing_lockout_ms"], 1500)
+
+    def test_every_gesture_is_optional(self):
+        p = write(self.tmp, 'return { pointer = { drag = false, scroll = false } }')
+        cfg, _ = config.evaluate(p)
+        self.assertEqual(cfg["pointer"]["drag"], False)
+        self.assertEqual(cfg["pointer"]["select"], True)
+
+    def test_non_bool_is_noted_and_defaulted(self):
+        p = write(self.tmp, 'return { pointer = { enabled = "yes" }, comfort = { typing_lockout_ms = 99999 } }')
+        cfg, _ = config.evaluate(p)
+        notes = config.validate(cfg)
+        self.assertEqual(cfg["pointer"]["enabled"], True)
+        self.assertEqual(cfg["comfort"]["typing_lockout_ms"], 5000)
+        self.assertTrue(any("pointer.enabled" in n for n in notes))

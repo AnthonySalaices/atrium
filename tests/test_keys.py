@@ -127,3 +127,73 @@ class TestSend(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StateRunner(Runner):
+    """Answers display-message with a fixed pane state, records the rest."""
+
+    def __init__(self, in_mode=0, alternate=0, mouse=0):
+        super().__init__()
+        self.state = "%d %d %d" % (in_mode, alternate, mouse)
+
+    def __call__(self, argv, **kw):
+        self.calls.append(argv)
+        p = FakeProc(0)
+        if argv[1] == "display-message":
+            p.stdout = self.state + "\n"
+        return p
+
+
+class TestScroll(unittest.TestCase):
+    """The pointer's scroll gesture, delivered three different ways."""
+
+    def test_mouse_reporting_app_gets_sgr_wheel_at_the_pointer_cell(self):
+        r = StateRunner(mouse=1)
+        out = keys.scroll("s", 3, col=12, row=7, runner=r)
+        self.assertEqual(out, {"sent": 3, "via": "wheel"})
+        argv = r.calls[-1]
+        self.assertEqual(argv[:5], [keys.TMUX, "send-keys", "-t", "s", "-l"])
+        self.assertEqual(argv[-1], "\x1b[<64;12;7M" * 3)
+
+    def test_wheel_down_is_button_65(self):
+        r = StateRunner(mouse=1)
+        keys.scroll("s", -1, runner=r)
+        self.assertEqual(r.calls[-1][-1], "\x1b[<65;1;1M")
+
+    def test_plain_shell_enters_copy_mode_with_exit_on_bottom(self):
+        r = StateRunner()
+        out = keys.scroll("s", 5, runner=r)
+        self.assertEqual(out, {"sent": 5, "via": "copy-mode"})
+        self.assertEqual(r.calls[1], [keys.TMUX, "copy-mode", "-e", "-t", "s"])
+        self.assertEqual(r.calls[2], [keys.TMUX, "send-keys", "-t", "s", "-X", "-N", "5", "scroll-up"])
+
+    def test_scroll_down_at_the_bottom_sends_nothing(self):
+        r = StateRunner()
+        out = keys.scroll("s", -5, runner=r)
+        self.assertEqual(out["sent"], 0)
+        self.assertEqual(len(r.calls), 1)          # only the state query
+
+    def test_scroll_down_inside_copy_mode_does_not_re_enter(self):
+        r = StateRunner(in_mode=1)
+        out = keys.scroll("s", -2, runner=r)
+        self.assertEqual(out, {"sent": 2, "via": "copy-mode"})
+        self.assertNotIn("copy-mode", [c[1] for c in r.calls])
+
+    def test_alternate_screen_without_mouse_is_skipped(self):
+        """⛔ Up/Down into an editor would be keystrokes, not scrolling."""
+        r = StateRunner(alternate=1)
+        out = keys.scroll("s", 3, runner=r)
+        self.assertEqual(out["sent"], 0)
+        self.assertIn("alternate", out["skipped"])
+        self.assertEqual(len(r.calls), 1)
+
+    def test_bad_input_is_rejected_before_tmux_is_asked(self):
+        r = StateRunner()
+        for bad in (0, "3", 3.0, True, 999):
+            with self.assertRaises(keys.Rejected, msg=repr(bad)):
+                keys.scroll("s", bad, runner=r)
+        with self.assertRaises(keys.Rejected):
+            keys.scroll("s", 1, col=0, runner=r)
+        with self.assertRaises(keys.Rejected):
+            keys.scroll("bad session!", 1, runner=r)
+        self.assertEqual(r.calls, [])

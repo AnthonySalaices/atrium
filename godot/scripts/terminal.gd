@@ -28,12 +28,20 @@ var xr_interface: OpenXRInterface
 var backdrop: Backdrop
 var ambience: Ambience
 var router: InputRouter
+var pointers: Pointers
 
 # The focus window: an oriented group holding the glass frame (in-scene geometry,
 # with the title strip drawn into its texture) and the composition layer inset
 # inside it. ⚠️ The layer composites OVER the scene and never depth-sorts, so
 # the frame simply sits 4 mm behind it — that IS the hybrid AS-0001 asked for.
 var focus_group: Node3D
+var frame_mesh: MeshInstance3D
+var frame_outer := Vector2.ZERO
+# Where the user dragged the focus window to, rig-relative; ZERO = the config's
+# default place. Survives a config rebuild, cleared by an explicit recentre —
+# which is also the way to undo a bad drop.
+var _focus_override := Vector3.ZERO
+var hover_dot: ColorRect          # drawn INTO the terminal layer, see Pointers
 var frame_vp: SubViewport
 var title_left: Label
 var title_right: Label
@@ -102,6 +110,17 @@ func _ready() -> void:
 	rail_root = Node3D.new()
 	rig.add_child(rail_root)
 
+	# Controllers / hands. ⚠️ Must be a child of the XROrigin3D, not the rig:
+	# tracker poses are origin-relative and the rig moves on every recentre.
+	pointers = Pointers.new()
+	origin.add_child(pointers)
+	pointers.card_selected.connect(switch_to)
+	pointers.overflow_selected.connect(func(): cycle_session(+1))
+	pointers.focus_moved.connect(_on_focus_dragged)
+	pointers.scroll.connect(func(lines, col, row): client.send_scroll(session, lines, col, row))
+	pointers.grid_hover.connect(_on_grid_hover)
+	_push_pointer_targets()
+
 	client = GlassClient.new()
 	add_child(client)
 	client.screen_frame.connect(_on_frame)
@@ -113,6 +132,9 @@ func _ready() -> void:
 		_update_status()
 		print("[term] link: " + t))
 	client.keys_ack.connect(_on_keys_ack)
+	client.scroll_ack.connect(func(m):
+		if m.has("skipped"):
+			print("[scroll] skipped: %s" % str(m["skipped"])))
 	client.sessions.connect(_on_sessions)
 	client.focus_hint.connect(func(k):
 		if k != focus_key:
@@ -180,6 +202,8 @@ func _show_pairing() -> void:
 		layer.visible = false
 	if rail_root:
 		rail_root.visible = false
+	if pointers:
+		pointers.enabled = false
 	pairing.paired.connect(func(h, p, t):
 		print("[pair] paired with %s:%d" % [h, p])
 		_hide_pairing()
@@ -203,6 +227,8 @@ func _hide_pairing() -> void:
 		layer.visible = true
 	if rail_root:
 		rail_root.visible = true
+	if pointers:
+		pointers.enabled = _pointer_cfg.get("enabled", true)
 
 
 func _on_frame(m: Dictionary) -> void:
@@ -325,9 +351,17 @@ func _build_panel() -> void:
 	grid.bg_default = GlassUI.BODY
 	viewport.add_child(grid)
 
+	# The pointer's hover dot lives in the layer's own pixels, hidden until a
+	# ray crosses the text. One cell, amber, translucent.
+	hover_dot = ColorRect.new()
+	hover_dot.color = Color(GlassUI.AMBER, 0.45)
+	hover_dot.size = Vector2(cell.x, cell.y)
+	hover_dot.visible = false
+	viewport.add_child(hover_dot)
+
 	# Aim the whole window once, then place frame and layer in its local space.
-	focus_group = GlassUI.oriented_group(rig,
-			GlassUI.polar(GlassUI.FOCUS_YAW_DEG, pitch_deg, distance))
+	focus_group = GlassUI.oriented_group(rig, _focus_override if _focus_override != Vector3.ZERO
+			else GlassUI.polar(GlassUI.FOCUS_YAW_DEG, pitch_deg, distance))
 
 	# The frame grows upward around the grid to make room for its title strip.
 	var pad := GlassUI.FRAME_PAD_M
@@ -348,7 +382,8 @@ func _build_panel() -> void:
 	var params := GlassUI.FRAME_TOKENS.duplicate()
 	params["attention"] = 0.0
 	params["content"] = frame_vp.get_texture()
-	GlassUI.glass(focus_group, outer, Vector3(0, title_h * 0.5, -0.004), params)
+	frame_mesh = GlassUI.glass(focus_group, outer, Vector3(0, title_h * 0.5, -0.004), params)
+	frame_outer = outer
 
 	# ⚠️ Quad, not cylinder: the cylinder layer did not follow the rig between
 	# rooms on 2026-09-15 and that is still unexplained. Quad is proven.
@@ -358,6 +393,7 @@ func _build_panel() -> void:
 	layer.sort_order = 1
 	focus_group.add_child(layer)
 	_update_status()
+	_push_pointer_targets()
 
 	var ang_rad := (dmm / float(GlassUI.FONT_PX)) * float(vp_w) / 1000.0
 	print("[term] %dx%d cells, viewport %dx%d, panel %.2fm x %.2fm at %.1fm = %.1f deg wide (%.1f dmm), yaw %.0f pitch %.0f"
@@ -375,17 +411,22 @@ func _rebuild_rail() -> void:
 	waiting_cards.clear()
 	var slots := GlassUI.rail_slots(known, session, focus_key)
 	var size := GlassUI.angular_size(GlassUI.CARD_W_DEG, GlassUI.CARD_H_DEG, GlassUI.RAIL_DIST)
+	_card_targets.clear()
 	for i in range(slots.size()):
 		var slot: Dictionary = slots[i]
 		var pos := GlassUI.polar(GlassUI.RAIL_YAW_DEG, float(GlassUI.RAIL_ELEV_DEG[i]),
 				GlassUI.RAIL_DIST)
 		if slot.has("overflow"):
-			GlassUI.card(rail_root, font, pos, size, "+%d more" % int(slot["overflow"]), "", 0.0)
+			var o := GlassUI.card(rail_root, font, pos, size, "+%d more" % int(slot["overflow"]), "", 0.0)
+			_card_targets.append({"mesh": o["mesh"], "size": size, "overflow": true})
 			continue
 		var c := GlassUI.card(rail_root, font, pos, size, str(slot["key"]),
 				str(slot["state"]), float(slot["attention"]))
+		_card_targets.append({"mesh": c["mesh"], "size": size, "key": str(slot["key"])})
 		if float(slot["attention"]) > 0.5:
 			waiting_cards.append((c["mesh"] as MeshInstance3D).material_override)
+	if pointers:
+		pointers.set_cards(_card_targets)
 
 
 ## Attention motion: the amber edge breathes on cards that are waiting on you.
@@ -410,6 +451,12 @@ func _apply_config(cfg: Dictionary) -> void:
 	var new_dist := float(p.get("distance_m", distance))
 	var new_pitch := float(p.get("pitch_deg", pitch_deg))
 	_apply_backdrop_config(cfg)
+	_pointer_cfg = cfg.get("pointer", {})
+	if pointers:
+		pointers.set_config(_pointer_cfg,
+				int(cfg.get("comfort", {}).get("typing_lockout_ms", 1500)))
+		if pairing != null:
+			pointers.enabled = false
 	if is_equal_approx(new_dmm, dmm) and new_cols == cols and new_rows == rows \
 			and is_equal_approx(new_dist, distance) and is_equal_approx(new_pitch, pitch_deg):
 		return
@@ -440,6 +487,10 @@ func recenter() -> void:
 	rig.transform = Transform3D(Basis.looking_at(fwd, Vector3.UP), t.origin)
 	if backdrop:
 		backdrop.anchor(rig.transform)
+	# A recentre is also "put my window back where it belongs".
+	if _focus_override != Vector3.ZERO:
+		_focus_override = Vector3.ZERO
+		_place_focus(GlassUI.polar(GlassUI.FOCUS_YAW_DEG, pitch_deg, distance))
 
 
 var _auto_tries := 0
@@ -609,7 +660,57 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if not k.echo and k.keycode == KEY_F1:
 		recenter()
 		return
-	if router != null and router.feed(k) and ambience != null:
+	if router != null and router.feed(k):
+		if pointers:
+			pointers.note_typing()
 		# The click belongs to keys that actually reach a pane, so a chord the
 		# router refused stays silent instead of sounding like it typed.
-		ambience.click()
+		if ambience != null:
+			ambience.click()
+
+
+# ── Pointer plumbing ──────────────────────────────────────────────────────────
+
+var _pointer_cfg := {}
+var _card_targets: Array = []
+
+
+func _push_pointer_targets() -> void:
+	if pointers == null or frame_mesh == null:
+		return
+	pointers.set_frame(frame_mesh, frame_outer, GlassUI.FRAME_TITLE_M,
+			GlassUI.term_size(cols, rows, dmm, distance), cols, rows)
+	pointers.set_cards(_card_targets)
+
+
+## Put the focus group at a rig-local position, aimed at the rig origin the
+## same way oriented_group() does, so frame and layer keep nesting.
+func _place_focus(local_pos: Vector3) -> void:
+	if focus_group == null:
+		return
+	focus_group.position = local_pos
+	if local_pos.length() > 0.001:
+		focus_group.look_at(rig.to_global(Vector3.ZERO), Vector3.UP)
+		focus_group.rotate_object_local(Vector3.UP, PI)
+
+
+func _on_focus_dragged(world_pos: Vector3) -> void:
+	if focus_group == null or rig == null:
+		return
+	var local := rig.to_local(world_pos)
+	# Keep it in front and off the floor; the pointer already bounds distance.
+	if local.length() < 0.3:
+		return
+	_focus_override = local
+	_place_focus(local)
+
+
+func _on_grid_hover(col: int, row: int) -> void:
+	if hover_dot == null:
+		return
+	if col < 1 or row < 1:
+		hover_dot.visible = false
+		return
+	var cell := GlassUI.CELL
+	hover_dot.position = Vector2((col - 1) * cell.x, (row - 1) * cell.y)
+	hover_dot.visible = true

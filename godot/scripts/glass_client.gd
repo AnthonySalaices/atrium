@@ -12,6 +12,7 @@ signal sessions(list)
 signal config_changed(cfg)
 signal link_state(text)
 signal keys_ack(msg)
+signal scroll_ack(msg)
 ## The host's recommendation for `jump to whoever needs me`, or "" for nobody.
 signal focus_hint(key)
 
@@ -93,6 +94,14 @@ func send_keys(key: String, seq: Array, stamp := 0) -> void:
 	_send({"op": "keys", "key": key, "seq": seq, "t": stamp})
 
 
+## A pointer scroll. `lines` > 0 = older; col/row = the 1-based cell under
+## the ray, which the host forwards to apps that take a mouse wheel.
+func send_scroll(key: String, lines: int, col: int, row: int) -> void:
+	if not connected or lines == 0:
+		return
+	_send({"op": "scroll", "key": key, "lines": lines, "col": col, "row": row})
+
+
 func _send(obj: Dictionary) -> void:
 	_ws.send_text(JSON.stringify(obj))
 
@@ -152,5 +161,7 @@ func _process(delta: float) -> void:
 				emit_signal("config_changed", msg.get("config", {}))
 			"keys-ack":
 				emit_signal("keys_ack", msg)
+			"scroll-ack":
+				emit_signal("scroll_ack", msg)
 			"error":
 				emit_signal("link_state", "server error: " + str(msg.get("error", "")))

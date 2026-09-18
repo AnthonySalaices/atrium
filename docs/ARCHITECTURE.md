@@ -139,6 +139,50 @@ Two safety properties, both deliberate:
 - Names are validated against a **whitelist** on the host, and every call is argv — never a shell
   string.
 
+### Pointing: controllers and hands are one thing
+
+```json
+{"op":"scroll","key":"my-session","lines":3,"col":12,"row":7}
+```
+
+The headset side (`pointers.gd`) treats a Touch controller and a tracked hand identically: a ray
+from the **aim pose** with the **`trigger_click`** action on it. The `ext/hand_interaction_ext`
+profile in the action map binds the index pinch and the hand's aim to those same two actions, so
+setting the controllers down changes nothing in the code. (`xr/openxr/extensions/hand_interaction_profile`
+must be on or the profile is never offered.)
+
+⛔ **Composition layers receive no input and draw over the scene.** What gets hit-tested is the
+in-scene glass **frame** behind the terminal layer (its top band is the title strip) and the rail
+cards — never the layer. For the same reason the hover dot over the text is drawn *into* the
+terminal viewport (one translucent cell), because a 3D dot there would be hidden behind the layer.
+
+Gestures, all optional through `pointer.*` in the config, keyboard complete without them:
+
+| gesture | on | does |
+|---|---|---|
+| press + release | a rail card | `switch_to(key)`; the `+N more` card cycles |
+| hold + move | the title strip | drags the focus window, kept at its distance; thumbstick forward/back pushes/pulls |
+| hold + move up/down | the text | scrolls by rows dragged |
+| thumbstick up/down | pointing at the text | scrolls at `scroll_lines_per_s` |
+
+A dragged window keeps its rig-relative position through config rebuilds; an explicit **recentre
+puts it back** to the config's place, which is also the undo for a bad drop. A hand pinch within
+`comfort.typing_lockout_ms` of a keystroke is ignored — fingers resting on a keyboard look exactly
+like pinches to the tracker — while a controller trigger is not.
+
+**Scrolling is decided per call, on the host, by asking tmux what the pane is doing** (`keys.scroll`):
+
+1. The app has mouse reporting on (Claude Code, Codex, most TUIs): the host writes the SGR wheel
+   sequence `ESC [ < 64|65 ; col ; row M` straight into the pane at the pointer's cell. The app
+   scrolls itself as under a real wheel; copy-mode is never involved.
+2. A plain shell on the normal screen: `copy-mode -e`, then `send-keys -X -N n scroll-up`.
+   ⭐ `-e` is the exit design: the moment a scroll-down reaches the bottom, copy-mode ends by
+   itself. A gesture never leaves a live agent pane parked in copy-mode.
+3. An alternate-screen app without mouse reporting (vim with no mouse, `less`): nothing is safe
+   to send — Up/Down would be keystrokes into an editor — so it is skipped and the ack says why.
+
+Same subscription rule as typing, same rate bucket, argv only.
+
 ### The one file route
 
 `GET /backdrop.glb` hands back whatever `backdrop.custom.glb` names, behind the same token as
@@ -407,6 +451,10 @@ python3 tools/keys-smoke.py             # drives the real WebSocket: subscribe, 
                                         # read the text back out of a throwaway pane,
                                         # confirm a bad key name is refused, confirm
                                         # the window geometry is restored
+python3 tools/scroll-smoke.py           # the three scroll deliveries against real panes,
+                                        # including copy-mode exiting at the bottom
+$GODOT --headless --path godot --script res://../tools/pointer-check.gd
+                                        # hit maths + every pointer gesture, no XR runtime
 ```
 
 The flat preview (`preview.gd`, `--shot out.png [--backdrop cafe|nebula|void] [--crop COLSxROWS]`) renders the exact

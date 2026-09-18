@@ -196,6 +196,27 @@ def validate(cfg):
         note("comfort.foveation clamped to %d" % int(v))
     comfort["foveation"] = int(v)
 
+    # ── pointer ─────────────────────────────────────────────────────────────
+    ptr = cfg.setdefault("pointer", {})
+    if not isinstance(ptr, dict):
+        note("pointer must be a table — using defaults")
+        ptr = {}
+        cfg["pointer"] = ptr
+    for key in ("enabled", "select", "drag", "scroll", "show_ray"):
+        v = ptr.get(key, True)
+        if not isinstance(v, bool):
+            note("pointer.%s must be true/false — using true" % key)
+            v = True
+        ptr[key] = v
+    v, changed = _clamp(ptr.get("scroll_lines_per_s"), 2.0, 60.0, 14.0)
+    if changed:
+        note("pointer.scroll_lines_per_s clamped to %g" % v)
+    ptr["scroll_lines_per_s"] = v
+    v, changed = _clamp(comfort.get("typing_lockout_ms"), 0, 5000, 1500)
+    if changed:
+        note("comfort.typing_lockout_ms clamped to %d" % int(v))
+    comfort["typing_lockout_ms"] = int(v)
+
     # ── ambience ────────────────────────────────────────────────────
     amb = cfg.setdefault("ambience", {})
     v, changed = _clamp(amb.get("volume"), 0.0, 1.0, 0.10)

@@ -272,6 +272,24 @@ return {
   },
 
   ----------------------------------------------------------------------------
+  -- POINTER (controllers and hands)
+  ----------------------------------------------------------------------------
+  -- A ray from each controller's aim pose, or from a tracked hand's pinch.
+  -- Trigger = pinch. Every gesture is optional and the keyboard stays complete
+  -- without any of them.
+  pointer = {
+    enabled = true,
+    select  = true,         -- point at a rail card + trigger/pinch = show it
+    drag    = true,         -- hold on the title strip and move the window;
+                            -- thumbstick forward/back while holding = push/pull
+    scroll  = true,         -- hold on the text and drag, or thumbstick up/down,
+                            -- to scroll the pane (mouse wheel to apps that
+                            -- take one; copy-mode -e for a plain shell)
+    scroll_lines_per_s = 14,  -- thumbstick scroll speed at full deflection
+    show_ray = true,        -- draw the ray; the hit dot always shows
+  },
+
+  ----------------------------------------------------------------------------
   -- COMFORT / PERFORMANCE
   ----------------------------------------------------------------------------
   comfort = {

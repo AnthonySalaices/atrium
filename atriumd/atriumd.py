@@ -672,6 +672,22 @@ def ws_reader(c):
                             print("[keys] rejected for %s: %s" % (key, e), flush=True)
                             c.send({"type": "error", "key": key,
                                     "error": "keys rejected: %s" % e})
+                elif msg.get("op") == "scroll" and msg.get("key"):
+                    key = msg["key"]
+                    # Same rule as typing: only into a pane this client watches.
+                    if key not in c.subs:
+                        c.send({"type": "error", "key": key,
+                                "error": "not subscribed"})
+                    else:
+                        try:
+                            r = _keys.scroll(key, msg.get("lines", 0),
+                                             msg.get("col", 1), msg.get("row", 1))
+                            r.update({"type": "scroll-ack", "key": key})
+                            c.send(r)
+                        except _keys.Rejected as e:
+                            print("[scroll] rejected for %s: %s" % (key, e), flush=True)
+                            c.send({"type": "error", "key": key,
+                                    "error": "scroll rejected: %s" % e})
                 elif msg.get("op") == "ping":
                     for k in c.subs:
                         _pin.keepalive(k)

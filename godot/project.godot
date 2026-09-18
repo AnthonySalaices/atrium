@@ -29,6 +29,11 @@ openxr/foveation_level=2
 ; but silently produce nothing, and every run logs
 ; "Property not found: 'xr/openxr/extensions/hand_tracking'".
 openxr/extensions/hand_tracking=true
+; Hands as a controller: XR_EXT_hand_interaction makes the index pinch and the
+; hand's aim pose show up on the SAME actions the Touch controllers bind
+; (`trigger_click`, `aim_pose`), via the ext/hand_interaction_ext profile in
+; openxr_action_map.tres. Without this setting that profile is never offered.
+openxr/extensions/hand_interaction_profile=true
 ; Same gate as hand_tracking: without this the Meta passthrough manifest feature
 ; is never injected and the runtime offers ONLY the opaque blend mode — which is
 ; exactly what the headset reported on 2026-09-15.
