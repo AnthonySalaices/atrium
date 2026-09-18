@@ -44,7 +44,7 @@ const TAP_MAX_S := 0.6
 const DRAG_DIST_MIN := 0.6
 const DRAG_DIST_MAX := 3.0
 const PUSH_PULL_M_PER_S := 1.2
-const RESIZE_PER_S := 0.6          # 60 % per second at full deflection
+const RESIZE_PER_S := 0.9          # 90 % per second at full deflection
 const RAY_IDLE_M := 0.6
 const DOT_RADIUS_M := 0.006
 const HAPTIC_TAP := 0.35
@@ -155,12 +155,26 @@ func note_typing() -> void:
 	_typed_ms = Time.get_ticks_msec()
 
 
-## A target that was freed mid-gesture must not be touched again.
+## A target that was freed mid-gesture must not be touched again — but a
+## re-registration of the SAME frame (a live resize re-pushes it every frame)
+## must not end the grab that is doing the resizing. Only a gesture whose
+## target mesh is gone ends here.
 func _drop_targets() -> void:
 	for h in _hands:
 		if h["mode"] != "":
-			_end_gesture(h)
+			var m = h["target"].get("mesh")
+			if m == null or not is_instance_valid(m) or not _is_target(m):
+				_end_gesture(h)
 		h["hit"] = {}
+
+
+func _is_target(m) -> bool:
+	if m == _frame:
+		return true
+	for card in _cards:
+		if card["mesh"] == m:
+			return true
+	return false
 
 
 func _process(delta: float) -> void:

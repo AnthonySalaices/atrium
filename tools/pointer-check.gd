@@ -45,6 +45,7 @@ func _run() -> void:
 	ptr.overflow_selected.connect(func(): got.append(["overflow"]))
 	ptr.focus_moved.connect(func(p): got.append(["moved", p]))
 	ptr.focus_drag_ended.connect(func(): got.append(["drag_end"]))
+	ptr.focus_resized.connect(func(f): got.append(["resized", f]))
 	ptr.scroll.connect(func(n, c, r): got.append(["scroll", n, c, r]))
 
 	# The focus frame exactly as terminal.gd builds it.
@@ -185,10 +186,18 @@ func _run() -> void:
 	ptr.step(h, eye, cdir, false, Vector2.ZERO, 0.016, false)
 	check(got == [["card", "s1"]], "a CONTROLLER trigger right after typing still works", str(got))
 
-	print("── targets vanish mid-gesture")
+	print("── targets change mid-gesture")
 	ptr.step(h, eye, sdir, true, Vector2.ZERO, 0.016, false)
 	check(h["mode"] == "drag", "holding the strip")
 	got.clear()
 	ptr.set_cards([])
-	check(h["mode"] == "" and got == [["drag_end"]], "a rebuild ends the gesture cleanly", str(got))
+	check(h["mode"] == "drag" and got.is_empty(), "a rail rebuild does NOT end a frame grab", str(got))
+	ptr.set_frame(frame, outer, title_h, term, cols, rows)
+	check(h["mode"] == "drag" and got.is_empty(), "re-pushing the SAME frame (live resize) keeps the grab", str(got))
+	ptr.step(h, eye, sdir, true, Vector2(1, 0), 0.5, false)
+	check(got.size() == 2 and got[0][0] == "resized" and got[0][1] > 1.3, "thumbstick right while holding asks for a bigger window", str(got))
+	got.clear()
+	var frame2 := GlassUI.glass(group, outer, Vector3(0, title_h * 0.5, -0.004), params)
+	ptr.set_frame(frame2, outer, title_h, term, cols, rows)
+	check(h["mode"] == "" and got == [["drag_end"]], "a NEW frame mesh ends the gesture cleanly", str(got))
 	ptr.step(h, eye, sdir, false, Vector2.ZERO, 0.016, false)
