@@ -208,7 +208,9 @@ func _run() -> void:
 	var t0 := 100000
 	ptr._typed_ms = -100000
 	check(not ptr.hand_allowed(hh, head - 0.60, -0.3, head, t0), "a hand low at the keyboard gets no ray")
-	check(not ptr.hand_allowed(hh, head - 0.30, -0.8, head, t0), "a raised hand aimed at the desk gets no ray")
+	check(not ptr.hand_allowed(hh, head - 0.30, -0.9, head, t0), "a raised hand aimed steeply at the desk gets no ray")
+	check(ptr.hand_allowed(hh, head - 0.30, -0.6, head, t0), "a raised hand aimed at the window's bottom rows points")
+	hh["raised"] = false
 	check(ptr.hand_allowed(hh, head - 0.30, -0.1, head, t0), "a raised hand aimed at the windows points")
 	check(ptr.hand_allowed(hh, head - 0.47, -0.1, head, t0), "hysteresis: it stays active a little lower")
 	check(not ptr.hand_allowed(hh, head - 0.55, -0.1, head, t0), "...until it drops well below")

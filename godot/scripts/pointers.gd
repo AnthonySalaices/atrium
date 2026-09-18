@@ -74,7 +74,11 @@ var hands_enabled := true
 #     keystrokes never click.
 const RAISE_ON_M := 0.42       # hand within this far below the eyes -> active
 const RAISE_OFF_M := 0.52      # ...and stays active until it drops below this
-const AIM_MIN_Y := -0.5        # aim more than ~30 deg down = pointing at the desk
+# ⚠️ Was -0.5 (~30 deg): the window's bottom rows — the newest text — sit ~35
+# deg below the eye, so pointing at them counted as "at the desk" and scrolling
+# to the latest was impossible (9/17). Hands ON the keyboard are caught by the
+# height rule; this only drops rays aimed steeply at the desk.
+const AIM_MIN_Y := -0.8        # aim more than ~53 deg down = pointing at the desk
 const PINCH_HOLD_MS := 150
 
 # Targets. The frame is one quad in the focus group's local space; its top
@@ -90,6 +94,7 @@ var _cards: Array = []            # [{mesh, size, key, overflow}]
 var _hands: Array = []            # one Dictionary of state per hand
 var _typed_ms := -100000
 var _hover_cell := Vector2i(-1, -1)
+var _gated_log_ms := 0
 
 
 func _ready() -> void:
@@ -246,6 +251,12 @@ func _process(delta: float) -> void:
 			var cam := get_viewport().get_camera_3d()
 			var head_y := cam.global_position.y if cam else t.origin.y
 			if not hand_allowed(h, t.origin.y, (-t.basis.z).y, head_y, now):
+				# Tuning data: a pinch the rules swallowed, at most once a second.
+				if pressed and now - _gated_log_ms > 1000:
+					_gated_log_ms = now
+					print("[hands] %s pinch ignored: %.2f m below eyes, aim y %.2f, typing %s, hands %s"
+							% [h["side"], head_y - t.origin.y, (-t.basis.z).y,
+							   (now - _typed_ms) < typing_lockout_ms, hands_enabled])
 				if h["mode"] != "":
 					_end_gesture(h)
 				h["pinch_since"] = -1
