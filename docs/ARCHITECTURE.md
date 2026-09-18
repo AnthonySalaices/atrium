@@ -425,6 +425,24 @@ Vendor option names are effectively undocumented; extract them from the plugin b
 - ⚠️ `pkill -f <pattern>` matches the command line of the shell that invoked it, so it kills its
   own caller. Find the pid from the listening socket instead.
 
+### A big backdrop mesh loses millimetres on import
+
+Godot's default scene import stores vertex positions as 16 bits across each
+mesh's bounding box. A baked room that includes a distant view is one mesh
+hundreds of metres across, so heights snap to steps of several millimetres, and
+a napkin modelled 1 mm above a table lands exactly on it and z-fights as you
+move your head. Backdrop GLBs import with `meshes/force_disable_compression=true`
+and `meshes/generate_lods=false` (the room carries its own distance detail);
+`tools/mesh-compress-check.gd` fails the build otherwise.
+
+### A pin must survive a client that goes quiet and comes back
+
+The pin watchdog restores a window after `SILENCE_TIMEOUT` without pings. An
+app that is backgrounded that long can resume on the same socket, so a ping
+from a subscribed client re-pins rather than only refreshing the timer.
+Otherwise the pane stays desktop-sized and the headset shows a crop whose lines
+never wrap.
+
 ## Config evaluation
 
 `config/eval.lua` loads `config/default.lua`, deep-merges the user's table over it, and prints
