@@ -41,6 +41,8 @@ var frame_outer := Vector2.ZERO
 # default place. Survives a config rebuild, cleared by an explicit recentre —
 # which is also the way to undo a bad drop.
 var _focus_override := Vector3.ZERO
+# A size the user chose with the thumbstick, in dmm; 0 = the config's font size.
+var _dmm_override := 0.0
 var hover_dot: ColorRect          # drawn INTO the terminal layer, see Pointers
 var frame_vp: SubViewport
 var title_left: Label
@@ -117,6 +119,7 @@ func _ready() -> void:
 	pointers.card_selected.connect(switch_to)
 	pointers.overflow_selected.connect(func(): cycle_session(+1))
 	pointers.focus_moved.connect(_on_focus_dragged)
+	pointers.focus_resized.connect(_on_focus_resized)
 	pointers.scroll.connect(func(lines, col, row): client.send_scroll(session, lines, col, row))
 	pointers.grid_hover.connect(_on_grid_hover)
 	_push_pointer_targets()
@@ -369,12 +372,12 @@ func _build_panel() -> void:
 	var outer := Vector2(term.x + pad * 2.0, term.y + pad * 2.0 + title_h)
 	# ⚠️ Match the GRID's pixels-per-metre, or the same font size comes out ~3x
 	# larger on the strip and clips off the top of it.
-	var px_per_m := float(vp_h) / term.y
+	var px_per_m := float(vp_h) / term.y * GlassUI.UI_PX_SCALE
 	var oh := outer.y * px_per_m
 	frame_vp = GlassUI.content_viewport(self,
 			Vector2i(int(round(outer.x * px_per_m)), int(round(oh))), true)
 	var strip_px := title_h / outer.y * oh
-	var title_px := 40          # ~30 dmm: a touch larger than the 22.3 dmm body
+	var title_px := GlassUI.TITLE_PX   # ~30 dmm: a touch larger than the 22.3 dmm body
 	title_left = GlassUI.baseline_label(frame_vp, font, session, title_px,
 			GlassUI.TEXT_PRIMARY, pad * px_per_m + 6.0, strip_px * 0.70)
 	title_right = GlassUI.baseline_label(frame_vp, font, "", title_px,
@@ -442,10 +445,14 @@ func _process(delta: float) -> void:
 			m.set_shader_parameter("gain_attention", g)
 
 
+var _last_cfg := {}
+
+
 func _apply_config(cfg: Dictionary) -> void:
+	_last_cfg = cfg
 	var f = cfg.get("font", {})
 	var p = cfg.get("panels", {}).get("focus", {})
-	var new_dmm := float(f.get("size_dmm", dmm))
+	var new_dmm := _dmm_override if _dmm_override > 0.0 else float(f.get("size_dmm", dmm))
 	var new_cols := int(p.get("cols", cols))
 	var new_rows := int(p.get("rows", rows))
 	var new_dist := float(p.get("distance_m", distance))
@@ -487,10 +494,13 @@ func recenter() -> void:
 	rig.transform = Transform3D(Basis.looking_at(fwd, Vector3.UP), t.origin)
 	if backdrop:
 		backdrop.anchor(rig.transform)
-	# A recentre is also "put my window back where it belongs".
+	# A recentre is also "put my window back where it belongs", size included.
 	if _focus_override != Vector3.ZERO:
 		_focus_override = Vector3.ZERO
 		_place_focus(GlassUI.polar(GlassUI.FOCUS_YAW_DEG, pitch_deg, distance))
+	if _dmm_override > 0.0:
+		_dmm_override = 0.0
+		_resize_panel(float(_last_cfg.get("font", {}).get("size_dmm", 22.3)))
 
 
 var _auto_tries := 0
@@ -570,7 +580,7 @@ func _update_status() -> void:
 	var right := GlassUI.title_right_text(waiting_count(), crop)
 	title_right.text = right
 	# ⚠️ Measure the string; a guessed fraction of the width runs off the frame.
-	var title_px := 40
+	var title_px := GlassUI.TITLE_PX
 	var w := font.get_string_size(right, HORIZONTAL_ALIGNMENT_LEFT, -1, title_px).x
 	var pad_px := float(frame_vp.size.y) / (GlassUI.term_size(cols, rows, dmm, distance).y \
 			+ GlassUI.FRAME_PAD_M * 2.0 + GlassUI.FRAME_TITLE_M) * GlassUI.FRAME_PAD_M
@@ -714,3 +724,33 @@ func _on_grid_hover(col: int, row: int) -> void:
 	var cell := GlassUI.CELL
 	hover_dot.position = Vector2((col - 1) * cell.x, (row - 1) * cell.y)
 	hover_dot.visible = true
+
+
+## Live resize: the same cell grid, a different physical size. Only the layer's
+## quad, the frame quad and its content viewport change — no resubscribe, no
+## new SubViewport for the grid, so this is cheap enough to run every frame
+## while the thumbstick is held.
+func _on_focus_resized(factor: float) -> void:
+	_resize_panel(clampf(dmm * factor, 16.0, 40.0))
+
+
+func _resize_panel(new_dmm: float) -> void:
+	if layer == null or frame_mesh == null or is_equal_approx(new_dmm, dmm):
+		return
+	dmm = new_dmm
+	_dmm_override = new_dmm
+	var term := GlassUI.term_size(cols, rows, dmm, distance)
+	var pad := GlassUI.FRAME_PAD_M
+	var title_h := GlassUI.FRAME_TITLE_M
+	var outer := Vector2(term.x + pad * 2.0, term.y + pad * 2.0 + title_h)
+	layer.quad_size = term
+	(frame_mesh.mesh as QuadMesh).size = outer
+	(frame_mesh.material_override as ShaderMaterial).set_shader_parameter("aspect", outer.x / outer.y)
+	frame_outer = outer
+	# The strip's pixels per metre must keep matching the grid's, or the title
+	# text changes size relative to the body. Rescale the viewport, keep the
+	# labels where they are in it.
+	var px_per_m := float(viewport.size.y) / term.y * GlassUI.UI_PX_SCALE
+	frame_vp.size = Vector2i(int(round(outer.x * px_per_m)), int(round(outer.y * px_per_m)))
+	_update_status()
+	_push_pointer_targets()

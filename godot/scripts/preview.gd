@@ -115,12 +115,12 @@ func _build_focus_panel(eye: Node3D) -> void:
 	var group := GlassUI.oriented_group(eye,
 			GlassUI.polar(GlassUI.FOCUS_YAW_DEG, GlassUI.FOCUS_ELEV_DEG, PANEL_DIST))
 
-	var px_per_m := float(ROWS * GlassUI.CELL.y) / term.y
+	var px_per_m := float(ROWS * GlassUI.CELL.y) / term.y * GlassUI.UI_PX_SCALE
 	var oh := outer.y * px_per_m
 	var title_vp := GlassUI.content_viewport(self,
 			Vector2i(int(round(outer.x * px_per_m)), int(round(oh))), false)
 	var strip_px := title_h / outer.y * oh
-	var title_px := 40
+	var title_px := GlassUI.TITLE_PX
 	GlassUI.baseline_label(title_vp, font, FAKE_CURRENT, title_px, GlassUI.TEXT_PRIMARY,
 			pad * px_per_m + 6.0, strip_px * 0.70)
 	# `--crop 210x53` renders the badge an opted-out session gets, through the

@@ -18,7 +18,9 @@ class_name Pointers
 ## Gestures, every one optional (config `pointer`):
 ##   select  press+release on a rail card            -> card_selected(key)
 ##   drag    hold on the title strip, move the hand  -> focus_moved(world_pos)
+##           OR grip (grasp) anywhere on the frame
 ##           thumbstick fwd/back while holding       -> push / pull
+##           thumbstick left/right while holding     -> focus_resized(factor)
 ##   scroll  hold on the text and drag up/down       -> scroll(lines, col, row)
 ##           thumbstick up/down while pointing at it -> scroll(...)
 ##
@@ -30,6 +32,9 @@ signal card_selected(key: String)
 signal overflow_selected
 signal focus_moved(world_pos: Vector3)
 signal focus_drag_ended
+## Thumbstick left/right while holding the window: a size factor per second
+## (>1 = bigger), applied by the owner as a font-size change.
+signal focus_resized(factor: float)
 ## lines > 0 = older (up), < 0 = newer (down); col/row = 1-based cell under the ray.
 signal scroll(lines: int, col: int, row: int)
 ## The cell the ray is over, or (-1, -1). Only emitted when it changes.
@@ -39,6 +44,7 @@ const TAP_MAX_S := 0.6
 const DRAG_DIST_MIN := 0.6
 const DRAG_DIST_MAX := 3.0
 const PUSH_PULL_M_PER_S := 1.2
+const RESIZE_PER_S := 0.6          # 60 % per second at full deflection
 const RAY_IDLE_M := 0.6
 const DOT_RADIUS_M := 0.006
 const HAPTIC_TAP := 0.35
@@ -105,7 +111,7 @@ func _new_hand(c: XRController3D, side: String) -> Dictionary:
 
 	return {
 		"ctrl": c, "side": side, "ray": ray, "dot": dot,
-		"pressed": false, "mode": "", "target": {}, "press_t": 0.0,
+		"pressed": false, "gripped": false, "mode": "", "target": {}, "press_t": 0.0,
 		"grab_dist": 0.0, "grab_offset": Vector3.ZERO, "press_local_y": 0.0,
 		"scroll_acc": 0.0, "hit": {},
 	}
@@ -171,7 +177,7 @@ func _process(delta: float) -> void:
 		var t := c.global_transform
 		var stick := c.get_vector2("primary")
 		var cell := step(h, t.origin, -t.basis.z, c.is_button_pressed("trigger_click"),
-				stick, delta, _is_hand(c))
+				stick, delta, _is_hand(c), c.is_button_pressed("grip_click"))
 		if cell.x > 0:
 			hover = cell
 	if hover != _hover_cell:
@@ -182,16 +188,41 @@ func _process(delta: float) -> void:
 ## One frame of one hand. Pure of XR: the headless check drives this directly.
 ## Returns the grid cell under the ray (1-based) or (-1, -1).
 func step(h: Dictionary, origin: Vector3, dir: Vector3, pressed: bool,
-		stick: Vector2, delta: float, is_hand: bool) -> Vector2i:
+		stick: Vector2, delta: float, is_hand: bool, grip: bool = false) -> Vector2i:
 	var hit := _nearest_hit(origin, dir)
 	h["hit"] = hit
 	var cell := Vector2i(-1, -1)
 	if not hit.is_empty() and hit["kind"] == "grid":
 		cell = hit["cell"]
 
+	var now := Time.get_ticks_msec()
+
+	# Grip = grab. Anywhere on the frame, strip or text: the controller
+	# convention, and the hand's grasp lands on the same action. A grab in
+	# progress owns the hand until the grip opens; the trigger is ignored.
+	var was_grip: bool = h["gripped"]
+	h["gripped"] = grip
+	if grip and not was_grip and h["mode"] == "" and allow_drag \
+			and not hit.is_empty() and hit["kind"] in ["strip", "grid"] \
+			and not (is_hand and (now - _typed_ms) < typing_lockout_ms):
+		h["target"] = hit
+		h["press_t"] = now / 1000.0
+		h["mode"] = "drag"
+		h["grab_dist"] = hit["dist"]
+		h["grab_offset"] = (_frame.get_parent() as Node3D).global_position - hit["point"]
+		h["grab_by"] = "grip"
+		_haptic(h, HAPTIC_GRAB)
+	if h["mode"] == "drag" and h.get("grab_by", "") == "grip":
+		if grip:
+			_continue_gesture(h, hit, origin, dir, stick, delta)
+		else:
+			_end_gesture(h)
+		h["pressed"] = pressed
+		_draw(h, origin, dir, hit)
+		return cell
+
 	var was: bool = h["pressed"]
 	h["pressed"] = pressed
-	var now := Time.get_ticks_msec()
 
 	if pressed and not was:
 		# Press: what did it land on?
@@ -228,6 +259,7 @@ func _begin_gesture(h: Dictionary, hit: Dictionary, origin: Vector3, dir: Vector
 			h["mode"] = "drag"
 			h["grab_dist"] = hit["dist"]
 			h["grab_offset"] = (_frame.get_parent() as Node3D).global_position - hit["point"]
+			h["grab_by"] = "trigger"
 			_haptic(h, HAPTIC_GRAB)
 		"grid":
 			if not allow_scroll:
@@ -250,6 +282,8 @@ func _continue_gesture(h: Dictionary, hit: Dictionary, origin: Vector3, dir: Vec
 			if absf(stick.y) > 0.15:
 				h["grab_dist"] = clampf(h["grab_dist"] + stick.y * PUSH_PULL_M_PER_S * delta,
 						DRAG_DIST_MIN, DRAG_DIST_MAX)
+			if absf(stick.x) > 0.3:
+				emit_signal("focus_resized", 1.0 + stick.x * RESIZE_PER_S * delta)
 			emit_signal("focus_moved", origin + dir * h["grab_dist"] + h["grab_offset"])
 		"scroll":
 			# Drag the text: the hand moving up drags the content up, which
@@ -284,6 +318,7 @@ func _end_gesture(h: Dictionary) -> void:
 		emit_signal("focus_drag_ended")
 	h["mode"] = ""
 	h["target"] = {}
+	h["grab_by"] = ""
 
 
 func _haptic(h: Dictionary, amp: float) -> void:

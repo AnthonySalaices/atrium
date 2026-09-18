@@ -32,7 +32,15 @@ const CARD_H_DEG := 5.5
 const TEXT_INSET_H := 0.175
 const BASELINE_PRIMARY_H := -0.094     # above centre
 const BASELINE_SECONDARY_H := 0.242    # below centre
-const CARD_H_PX := 240                 # reference card is 329x120; 2x for clean text
+# ⚠️ UI textures (cards, title strip) are SubViewports sampled by a scene quad in
+# the eye buffer, and ViewportTextures have NO mipmaps — so any texture denser
+# than the eye buffer's ~17 px/deg aliases when minified ("text with a
+# transparent background is pixelated", owner 9/17). The terminal is unaffected:
+# a composition layer is filtered by the compositor. Keep these near display
+# density: 0.7x the grid's density for the strip, 168 px for a 5.5° card.
+const UI_PX_SCALE := 0.7
+const TITLE_PX := 28                   # 40 * UI_PX_SCALE
+const CARD_H_PX := 168                 # reference card is 329x120; ~1.4x the eye buffer
 
 # Focus frame tokens. ⚠️ Size-aware on purpose: the session card's .100h radius
 # on a 1.26 m panel would carve away usable terminal grid.
@@ -162,8 +170,8 @@ static func card(parent: Node, font: Font, pos: Vector3, size: Vector2, title: S
 	var h_px := float(CARD_H_PX)
 	var vp := content_viewport(parent, Vector2i(int(round(h_px * size.x / size.y)), int(h_px)), true)
 	var inset := TEXT_INSET_H * h_px
-	var primary_px := 56          # ~22.3 dmm at this card's angular height
-	var secondary_px := 48
+	var primary_px := 39          # ~22.3 dmm at this card's angular height
+	var secondary_px := 34
 	baseline_label(vp, font, title, primary_px, TEXT_PRIMARY,
 			inset, h_px * 0.5 + BASELINE_PRIMARY_H * h_px)
 	if state != "":
