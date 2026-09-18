@@ -31,6 +31,7 @@ import focus as _focus
 import agents as _agents
 import pairing as _pairing
 import spawn as _spawn
+import follow as _follow
 
 _pair = _pairing.Pairing()
 
@@ -160,6 +161,25 @@ def pin_excluded(key):
         except re.error:
             continue
     return False
+
+
+def _follow_mode():
+    """sessions.pin_mode: "follow" = the pane takes the size of whoever typed
+    last (follow.py); "resize" = force the headset's size (pin.py)."""
+    return ((_current_config().get("sessions") or {}).get("pin_mode") == "follow")
+
+
+def headset_hold(key, cols, rows):
+    """Give `key` the headset's geometry, the configured way. Returns True if held."""
+    if _follow_mode():
+        return _follow.attach(key, cols, rows)
+    return _pin.pin(key, cols, rows)
+
+
+def headset_release(key):
+    """Let go of `key` whichever way it is held (both are no-ops when not)."""
+    _follow.detach(key)
+    _pin.unpin(key)
 
 
 def mirror_for(key):
@@ -623,7 +643,7 @@ def ws_reader(c):
                             print("[pin] %s opted out — streaming a %dx%d crop, desktop untouched"
                                   % (key, cols, rows), flush=True)
                         else:
-                            _pin.pin(key, cols, rows)
+                            headset_hold(key, cols, rows)
                     # A session you are WATCHING must appear in the switcher even
                     # if no agent has reported state for it — otherwise the panel
                     # you are looking at is missing from the list you cycle
@@ -641,7 +661,7 @@ def ws_reader(c):
                 elif msg.get("op") == "unsubscribe" and msg.get("key"):
                     c.subs.discard(msg["key"])
                     if not any(msg["key"] in o.subs for o in _clients if o.alive and o is not c):
-                        _pin.unpin(msg["key"])
+                        headset_release(msg["key"])
                 elif msg.get("op") == "resync" and msg.get("key"):
                     try:
                         full = mirror_for(msg["key"]).full()
@@ -660,6 +680,7 @@ def ws_reader(c):
                                 "error": "not subscribed"})
                     else:
                         try:
+                            _follow.claim(key)      # typing here = headset-sized
                             n = _keys.send(key, msg.get("seq", []))
                             # Typing into a panel is an acknowledgement: you are
                             # looking at it, so stop asking for attention.
@@ -681,6 +702,7 @@ def ws_reader(c):
                                 "error": "not subscribed"})
                     else:
                         try:
+                            _follow.claim(key)
                             r = _keys.scroll(key, msg.get("lines", 0),
                                              msg.get("col", 1), msg.get("row", 1))
                             r.update({"type": "scroll-ack", "key": key})
@@ -710,7 +732,7 @@ def ws_reader(c):
                         continue
                     try:
                         c.subs.discard(key)
-                        _pin.unpin(key)
+                        headset_release(key)
                         _spawn.close_session(key)
                         print("[spawn] %s closed from the headset" % key, flush=True)
                         drop(key, "closed")
@@ -727,9 +749,11 @@ def ws_reader(c):
                         if _pin.is_pinned(k):
                             _pin.keepalive(k)
                             continue
+                        if _follow.is_attached(k):
+                            continue
                         cols, rows = c.want.get(k, (0, 0))
                         if cols > 0 and rows > 0 and not pin_excluded(k) \
-                                and tmux_session_exists(k) and _pin.pin(k, cols, rows):
+                                and tmux_session_exists(k) and headset_hold(k, cols, rows):
                             print("[pin] %s re-pinned on a live client's ping" % k, flush=True)
                     c.send({"type": "pong", "now": now()})
     except Exception:
@@ -741,7 +765,7 @@ def ws_reader(c):
         # ⛔ Never leave someone's window at VR geometry because a client died.
         for k in list(c.subs):
             if not any(k in o.subs for o in _clients if o.alive):
-                _pin.unpin(k)
+                headset_release(k)
         try: conn.close()
         except Exception: pass
 

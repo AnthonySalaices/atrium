@@ -267,6 +267,13 @@ return {
     -- the headset shows the bottom-left crop of the desktop-sized pane
     -- instead. Same as `atrium pin off` inside a session, but permanent.
     pin_exclude = {},             -- Python regexes, e.g. { "^cc-1$", "desk" }
+    -- How the headset gets its size, for sessions not in pin_exclude:
+    -- "resize" = the window is forced to the headset's cols x rows while you
+    --            watch it (your desktop shrinks too), restored when you stop.
+    -- "follow" = the window takes the size of whoever typed LAST: type in the
+    --            headset and it is headset-sized, type on the desktop and it
+    --            is desktop-sized again. Nothing to restore if anything dies.
+    pin_mode = "resize",
 
     -- The "New" button under the window. What it runs is decided HERE, on the
     -- host; the headset can only ask for "a new one". "Close" kills the tmux

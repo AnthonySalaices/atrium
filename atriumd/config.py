@@ -299,6 +299,10 @@ def validate(cfg):
     if bad:
         note("sessions.pin_exclude: %d non-string entries ignored" % len(bad))
     sess["pin_exclude"] = [x for x in pe if isinstance(x, str)]
+    if sess.get("pin_mode") not in ("resize", "follow"):
+        note("sessions.pin_mode %r is not 'resize' or 'follow' — using 'resize'"
+             % sess.get("pin_mode"))
+        sess["pin_mode"] = "resize"
     new = sess.get("new")
     if not isinstance(new, dict):
         note("sessions.new must be a table — using defaults")
