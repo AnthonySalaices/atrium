@@ -3,7 +3,7 @@
 ⭐ "Provider" is the wrong axis; "harness" is the right one. DeepSeek, GPT, Claude
 and Qwen are models. What sits in a tmux pane is a *harness* (Claude Code, Codex
 CLI, Gemini CLI, aider, OpenCode…) and one harness can front several models.
-Glasshouse recognises harnesses and never touches a model or an API key, so
+Atrium recognises harnesses and never touches a model or an API key, so
 "DeepSeek support" is a row in this table, not an integration.
 
 Three tiers of knowing when an agent needs you:
@@ -12,8 +12,8 @@ Three tiers of knowing when an agent needs you:
                  lines of the pane are scraped for that harness's prompt phrases
                  (heuristic — the daemon marks it so the glow renders dimmer)
   2  hooks       the harness itself reports events (Claude Code hooks, Codex
-                 `notify`) — exact; handled in glassd.handle_event
-  1  user shim   any tool calls `glasshouse notify` — exact; not built yet
+                 `notify`) — exact; handled in atriumd.handle_event
+  1  user shim   any tool calls `atrium notify` — exact; not built yet
 
 Everything here is tier 3. Users extend the table from config.lua:
 
@@ -230,7 +230,7 @@ def session_allowed(name, cfg):
 
 
 def installed(t=None):
-    """Which harnesses are on $PATH — for `glasshouse init` and `doctor`."""
+    """Which harnesses are on $PATH — for `atrium init` and `doctor`."""
     t = t or HARNESSES
     found = {}
     path = os.environ.get("PATH", "").split(os.pathsep)

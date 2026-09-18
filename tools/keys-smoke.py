@@ -7,9 +7,9 @@ test that would have caught a wrong tmux key name, a broken op, or the
 not-subscribed guard, all of which are otherwise invisible until someone is
 wearing the Quest.
 
-    tools/keys-smoke.py            # against a running glassd on 127.0.0.1:7570
+    tools/keys-smoke.py            # against a running atriumd on 127.0.0.1:7570
 
-⚠️ It creates and kills its own tmux session (`glasshouse-smoke`) and never
+⚠️ It creates and kills its own tmux session (`atrium-smoke`) and never
 touches any other session.
 """
 
@@ -20,7 +20,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _ws import WS, tmux, token          # noqa: E402
 
-SESSION = "glasshouse-smoke"
+SESSION = "atrium-smoke"
 
 fails = []
 

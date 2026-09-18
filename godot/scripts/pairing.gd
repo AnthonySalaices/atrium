@@ -4,10 +4,10 @@ class_name Pairing
 ## First-run pairing card. Shown when the app has no host + token stored, or on
 ## ctrl+alt+P. The APK ships with no secret; this is how it gets one.
 ##
-##   1. broadcast a discovery ping; hosts running glassd answer with their name
+##   1. broadcast a discovery ping; hosts running atriumd answer with their name
 ##   2. the user picks one (or types an address), types the 6-digit code that
-##      `glasshouse pair` printed on the host
-##   3. POST /pair {code} -> {token}; stored in user://glasshouse.cfg
+##      `atrium pair` printed on the host
+##   3. POST /pair {code} -> {token}; stored in user://atrium.cfg
 ##
 ## Keyboard-only on purpose: the physical keyboard is the input device of this
 ## whole app, and a pairing card that needs hands is a card that fails on the
@@ -16,7 +16,7 @@ class_name Pairing
 signal paired(host: String, port: int, token: String)
 signal cancelled
 
-const CFG_PATH := "user://glasshouse.cfg"
+const CFG_PATH := "user://atrium.cfg"
 const DISCOVER_PORT := 7570
 
 var font: Font
@@ -90,8 +90,8 @@ func _build_card() -> void:
 
 func _render() -> void:
 	var lines := [
-		"Glasshouse",
-		"Run  glasshouse pair  on your computer, then enter the code.",
+		"Atrium",
+		"Run  atrium pair  on your computer, then enter the code.",
 		"",
 		"Host   %s%s" % [host, "▏" if field == 0 else ""],
 		"Code   %s%s" % [code, "▏" if field == 1 else ""],
@@ -111,7 +111,7 @@ func _render() -> void:
 	_vp.render_target_update_mode = SubViewport.UPDATE_ONCE
 
 
-## Broadcast on the LAN; every glassd answers with its name and port.
+## Broadcast on the LAN; every atriumd answers with its name and port.
 func _start_discovery() -> void:
 	_udp.set_broadcast_enabled(true)
 	var err := _udp.bind(0)
@@ -123,7 +123,7 @@ func _start_discovery() -> void:
 
 func _ping() -> void:
 	_udp.set_dest_address("255.255.255.255", DISCOVER_PORT)
-	_udp.put_packet(JSON.stringify({"glasshouse": "discover"}).to_utf8_buffer())
+	_udp.put_packet(JSON.stringify({"atrium": "discover"}).to_utf8_buffer())
 
 
 func _process(delta: float) -> void:
@@ -135,7 +135,7 @@ func _process(delta: float) -> void:
 		var pkt := _udp.get_packet()
 		var from := _udp.get_packet_ip()
 		var v = JSON.parse_string(pkt.get_string_from_utf8())
-		if typeof(v) != TYPE_DICTIONARY or str(v.get("glasshouse", "")) != "here":
+		if typeof(v) != TYPE_DICTIONARY or str(v.get("atrium", "")) != "here":
 			continue
 		var entry := {"name": str(v.get("name", from)), "host": from, "port": int(v.get("port", 7570))}
 		var dup := false
@@ -225,7 +225,7 @@ func _submit() -> void:
 func _on_http(result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
 	_busy = false
 	if result != HTTPRequest.RESULT_SUCCESS:
-		status = "! no answer from the host (%d) — is glassd running with --lan?" % result
+		status = "! no answer from the host (%d) — is atriumd running with --lan?" % result
 		_render()
 		return
 	var v = JSON.parse_string(body.get_string_from_utf8())
@@ -239,9 +239,9 @@ func _on_http(result: int, response_code: int, _headers: PackedStringArray, body
 	var reason := str(v.get("error", response_code)) if typeof(v) == TYPE_DICTIONARY else str(response_code)
 	match reason:
 		"wrong": status = "! wrong code"
-		"expired": status = "! that code expired — run  glasshouse pair  again"
-		"none": status = "! no code is active — run  glasshouse pair  on the host"
-		"locked": status = "! too many tries — wait 5 minutes, then  glasshouse pair"
+		"expired": status = "! that code expired — run  atrium pair  again"
+		"none": status = "! no code is active — run  atrium pair  on the host"
+		"locked": status = "! too many tries — wait 5 minutes, then  atrium pair"
 		_: status = "! pairing failed: " + reason
 	code = ""
 	_render()

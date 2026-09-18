@@ -1,6 +1,6 @@
 import copy, os, sys, threading, time, unittest
 from unittest import mock
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "glassd"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "atriumd"))
 import screen, sgr
 
 

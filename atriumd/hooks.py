@@ -3,7 +3,7 @@
 One installer per harness, all behind the same interface, registered in
 INSTALLERS and looked up by the harness id from agents.py. Adding a harness
 that has a hooks system is: subclass, set the file path, the event list and
-the entry shape. Nothing else in Glasshouse changes.
+the entry shape. Nothing else in Atrium changes.
 
 Every installer follows the rules that keep an edit to somebody's live agent
 config safe:
@@ -168,7 +168,7 @@ class JsonHooks:
             res.note = "backup: " + backup
         else:
             os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
-        tmp = self.path + ".glasshouse-tmp"
+        tmp = self.path + ".atrium-tmp"
         with open(tmp, "w") as f:
             f.write(rendered)
         os.replace(tmp, self.path)
@@ -195,7 +195,7 @@ class GeminiCli(JsonHooks):
     events = ["SessionStart", "BeforeAgent", "AfterAgent", "Notification", "SessionEnd"]
     timeout = 5
     timeout_ms = True
-    entry_name = "glasshouse"
+    entry_name = "atrium"
     matcher = "*"
 
 

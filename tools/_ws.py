@@ -1,6 +1,6 @@
 """Minimal WebSocket client for the smoke tests.
 
-glassd speaks a hand-rolled RFC 6455 subset, so this is a hand-rolled client to
+atriumd speaks a hand-rolled RFC 6455 subset, so this is a hand-rolled client to
 match: enough to connect, send masked text frames and read unmasked ones. Shared
 by the smoke tools so the protocol lives in exactly one place.
 """
@@ -14,13 +14,13 @@ import subprocess
 import time
 
 HOST, PORT = "127.0.0.1", 7570
-TOKEN_PATH = os.path.expanduser("~/.config/glasshouse/token")
+TOKEN_PATH = os.path.expanduser("~/.config/atrium/token")
 TMUX = "/usr/bin/tmux"
 
 
 def token():
     if not os.path.exists(TOKEN_PATH):
-        raise SystemExit("no token at %s — is glassd running?" % TOKEN_PATH)
+        raise SystemExit("no token at %s — is atriumd running?" % TOKEN_PATH)
     return open(TOKEN_PATH).read().strip()
 
 
@@ -30,7 +30,7 @@ def tmux(*args, **kw):
 
 
 class WS:
-    """The smallest client that speaks to glassd's hand-rolled WebSocket."""
+    """The smallest client that speaks to atriumd's hand-rolled WebSocket."""
 
     def __init__(self, path):
         self.s = socket.create_connection((HOST, PORT), timeout=5)

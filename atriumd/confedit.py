@@ -1,6 +1,6 @@
 """Small, surgical edits to the user's own config.lua.
 
-⛔ **This file belongs to the user.** `glasshouse preset` and `glasshouse pack`
+⛔ **This file belongs to the user.** `atrium preset` and `atrium pack`
 change exactly the keys they name and leave every comment, every other block and
 all of the formatting alone. A config tool that reformats the file people
 hand-edit is a config tool people stop using — and this one is optional sugar

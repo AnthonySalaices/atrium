@@ -1,8 +1,8 @@
-# Glasshouse
+# Atrium
 
 **Your terminal agents, as floating panels in a Quest 3 — each one glowing when it needs you.**
 
-Glasshouse renders a live terminal session inside a Meta Quest 3 as a sharp, readable panel on
+Atrium renders a live terminal session inside a Meta Quest 3 as a sharp, readable panel on
 an OpenXR composition layer, streamed from the machine the session actually runs on. It is built
 for people who run several coding agents at once (Claude Code, Codex, anything that lives in
 tmux) and want to *see* which one is waiting on them without alt-tabbing through panes.
@@ -48,7 +48,7 @@ from the critical path. The Godot client is **pure GDScript with zero native dep
    │  tmux session (claude, codex, …)    │        │                       │
    │     │ capture-pane -p -e -N         │        │   Godot 4 client      │
    │     ▼                               │        │     │                 │
-   │  glassd ── cell grid + row diffs ───┼─ WS ───┼──▶ cell painter       │
+   │  atriumd ── cell grid + row diffs ───┼─ WS ───┼──▶ cell painter       │
    │     ▲                               │ token  │     │                 │
    │     │ tmux send-keys ◀──── keys ────┼────────┼──   composition layer │
    │  config.lua (evaluated here)        │        │                       │
@@ -68,28 +68,28 @@ saving `config.lua` restyles the live panel with no rebuild and no reinstall.
 ## Install the host side
 
 ```bash
-pipx install git+https://github.com/AnthonySalaices/glasshouse   # or: pip install .
-glasshouse init
+pipx install git+https://github.com/AnthonySalaices/atrium   # or: pip install .
+atrium init
 ```
 
 `init` checks tmux and Python, finds the agent harnesses on your PATH (Claude Code, Codex,
 Gemini CLI, aider, OpenCode, …), offers to install each one's hooks so the glow is exact, writes
-`~/.config/glasshouse/config.lua` and a token, starts the daemon on your LAN, can register it to
+`~/.config/atrium/config.lua` and a token, starts the daemon on your LAN, can register it to
 start at login (no sudo), and prints a pairing card. Re-running it skips whatever is done;
 `--dry-run` only shows the plan.
 
-Then, in the headset, open Glasshouse and type the code from the card. That is the whole
-pairing: the APK carries no host and no secret. `glasshouse pair` prints a fresh code any time;
+Then, in the headset, open Atrium and type the code from the card. That is the whole
+pairing: the APK carries no host and no secret. `atrium pair` prints a fresh code any time;
 ctrl+alt+P in the headset opens the card again.
 
 ```bash
-glasshouse start claude-code ~/my-project   # an agent in a named tmux session (any harness)
-glasshouse config                           # your config.lua, restyles the headset live on save
-glasshouse doctor                           # what is installed, hooked and reachable
-glasshouse pin off                          # never let the headset shrink THIS session on your desktop
-glasshouse preset use cafe                  # what is behind the windows: cafe | nebula | void | passthrough
-glasshouse pack ~/rooms/loft.glb            # your own room instead — the daemon serves it to the headset
-glasshouse notify auto needs-input          # tell the daemon yourself, from any hook or script
+atrium start claude-code ~/my-project   # an agent in a named tmux session (any harness)
+atrium config                           # your config.lua, restyles the headset live on save
+atrium doctor                           # what is installed, hooked and reachable
+atrium pin off                          # never let the headset shrink THIS session on your desktop
+atrium preset use cafe                  # what is behind the windows: cafe | nebula | void | passthrough
+atrium pack ~/rooms/loft.glb            # your own room instead — the daemon serves it to the headset
+atrium notify auto needs-input          # tell the daemon yourself, from any hook or script
 ```
 
 Config is evaluated by `lupa` (Lua 5.4 in a wheel) so nothing needs compiling. A checkout that
@@ -118,7 +118,7 @@ loopback, which the headset cannot reach).
 Check it without a headset at all:
 
 ```bash
-curl -s "localhost:7570/screen/<session>.txt?token=$(cat ~/.config/glasshouse/token)"
+curl -s "localhost:7570/screen/<session>.txt?token=$(cat ~/.config/atrium/token)"
 python3 -m unittest discover -s tests     # 105 tests
 python3 tools/keys-smoke.py               # typing, end to end, no headset
 ```
@@ -147,7 +147,7 @@ one place a buggy hook could allow or deny tool calls.
 
 WezTerm's model: an opinionated baseline you override only where you disagree, reloaded on save.
 Every key is documented in [`config/default.lua`](config/default.lua); your overrides go in
-`~/.config/glasshouse/config.lua`.
+`~/.config/atrium/config.lua`.
 
 ```lua
 return {
@@ -188,7 +188,7 @@ degree**. The full ~104° field of view therefore holds roughly **162 columns, t
 single 80-column terminal eats about 51° of it.
 
 "Five readable terminals floating around me" is not a design decision, it is physically
-unavailable on this hardware. Glasshouse is built around that: **one** readable focus panel,
+unavailable on this hardware. Atrium is built around that: **one** readable focus panel,
 plus small glanceable tiles that carry a name, a state and a glow — never prose.
 
 ## Status

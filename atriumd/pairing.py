@@ -1,7 +1,7 @@
 """Pairing: a short code on the host, typed once in the headset, exchanged for
 the long-lived token. So the APK never carries a secret.
 
-    host:    glasshouse pair          -> prints a 6-digit code, valid 10 minutes
+    host:    atrium pair          -> prints a 6-digit code, valid 10 minutes
     headset: first-run card           -> POST /pair {"code": "123456"}
     daemon:  code ok -> {"token": ..} -> client stores it in user://
 

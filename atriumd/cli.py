@@ -1,37 +1,37 @@
-"""glasshouse — the host-side command.
+"""atrium — the host-side command.
 
-    glasshouse notify <session|auto> <state> [--reason R] [--detail D]
+    atrium notify <session|auto> <state> [--reason R] [--detail D]
         Tier-1 integration: tell the daemon what an agent is doing, from ANY
         tool, hook system or script. `auto` = the tmux session this shell is in.
         States: idle, working, needs-input, error, done, gone.
 
-    glasshouse hooks status|install|uninstall [harness|all] [--dry-run] [--path FILE]
+    atrium hooks status|install|uninstall [harness|all] [--dry-run] [--path FILE]
         Tier-2 integration: install the harness's own hook entries so the glow is
         exact. Backs up, merges, re-parses, idempotent.
 
-    glasshouse init [--yes] [--no-hooks] [--autostart|--no-autostart] [--dry-run]
+    atrium init [--yes] [--no-hooks] [--autostart|--no-autostart] [--dry-run]
         First-time setup on this computer: checks, finds your agent harnesses,
         offers their hooks, writes the config and token, starts the daemon on
         the LAN, optionally registers it to start at login, prints the pairing
         card. Safe to re-run; every step skips what is already done.
 
-    glasshouse start <harness> [dir] [--name NAME]
+    atrium start <harness> [dir] [--name NAME]
         Start an agent in a new named tmux session and attach to it. The one
-        command a non-tmux user ever needs; Glasshouse finds the session by
+        command a non-tmux user ever needs; Atrium finds the session by
         what is running in it.
 
-    glasshouse config
+    atrium config
         Open your config.lua in $EDITOR (created from the starter if missing).
 
-    glasshouse pair
+    atrium pair
         Print a one-time 6-digit code (valid 10 minutes) to type into the
         headset's pairing card. The APK ships with no secret; this is how it
         gets the token.
 
-    glasshouse doctor
+    atrium doctor
         What is installed, what is hooked, whether the daemon answers.
 
-    glasshouse up | daemon [--lan]
+    atrium up | daemon [--lan]
         Start the daemon detached (up) or in the foreground (daemon). A
         checkout can also use ./start.sh --lan.
 
@@ -45,15 +45,15 @@ import socket
 import subprocess
 import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))       # glassd/
+HERE = os.path.dirname(os.path.abspath(__file__))       # atriumd/
 ROOT = os.path.dirname(HERE)                               # the checkout, if any
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 import agents  # noqa: E402
 import hooks   # noqa: E402
 
-HOST = os.environ.get("GLASSHOUSE_HOST", "127.0.0.1")
-PORT = int(os.environ.get("GLASSHOUSE_PORT", "7570"))
+HOST = os.environ.get("ATRIUM_HOST", "127.0.0.1")
+PORT = int(os.environ.get("ATRIUM_PORT", "7570"))
 STATES = ("idle", "working", "needs-input", "error", "done", "gone")
 
 
@@ -72,9 +72,9 @@ def tmux_session(pane=None):
 def cmd_notify(a):
     key = tmux_session() if a.session == "auto" else a.session
     if not key:
-        sys.exit("glasshouse notify: not inside tmux and no session given")
+        sys.exit("atrium notify: not inside tmux and no session given")
     if a.state not in STATES:
-        sys.exit("glasshouse notify: state must be one of %s" % ", ".join(STATES))
+        sys.exit("atrium notify: state must be one of %s" % ", ".join(STATES))
     msg = {"src": "hook", "type": "notify", "key": key, "state": a.state,
            "agent": a.agent or "notify", "pane": os.environ.get("TMUX_PANE")}
     if a.reason:
@@ -165,7 +165,7 @@ def _lan_addresses():
 
 
 def _token():
-    p = os.environ.get("GLASSHOUSE_TOKEN_FILE") or os.path.join(CONFIG_DIR, "token")
+    p = os.environ.get("ATRIUM_TOKEN_FILE") or os.path.join(CONFIG_DIR, "token")
     try:
         with open(p) as f:
             return f.read().strip()
@@ -178,7 +178,7 @@ def cmd_pair(a):
     import http.client
     tok = _token()
     if not tok:
-        sys.exit("glasshouse pair: no token file yet — start the daemon once (./start.sh --lan)")
+        sys.exit("atrium pair: no token file yet — start the daemon once (./start.sh --lan)")
     try:
         c = http.client.HTTPConnection(HOST, PORT, timeout=3)
         c.request("POST", "/pair/new", body="{}",
@@ -186,21 +186,21 @@ def cmd_pair(a):
         r = c.getresponse()
         v = json.loads(r.read().decode() or "{}")
     except Exception as e:
-        sys.exit("glasshouse pair: daemon not reachable on %s:%d (%s) — run ./start.sh --lan" % (HOST, PORT, e))
+        sys.exit("atrium pair: daemon not reachable on %s:%d (%s) — run ./start.sh --lan" % (HOST, PORT, e))
     if r.status != 200 or "code" not in v:
-        sys.exit("glasshouse pair: daemon refused (%s %s)" % (r.status, v))
+        sys.exit("atrium pair: daemon refused (%s %s)" % (r.status, v))
     code = v["code"]
     mins = int(v.get("ttl", 600)) // 60
     addrs = _lan_addresses()
     lan = v.get("bind") not in (None, "127.0.0.1", "localhost")
     print()
     print("  ┌──────────────────────────────────────────┐")
-    print("  │  Glasshouse pairing                       │")
+    print("  │  Atrium pairing                       │")
     print("  │                                          │")
     print("  │  code   %s   %s                        │" % (code[:3], code[3:]))
     print("  │  host   %-33s│" % ((addrs[0] + ":" + str(PORT)) if addrs else "(no LAN address found)"))
     print("  │                                          │")
-    print("  │  Put the headset on, open Glasshouse and  │")
+    print("  │  Put the headset on, open Atrium and  │")
     print("  │  enter the code. Valid %2d minutes, once.  │" % mins)
     print("  └──────────────────────────────────────────┘")
     if len(addrs) > 1:
@@ -211,12 +211,12 @@ def cmd_pair(a):
     return 0
 
 
-CONFIG_DIR = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), "glasshouse")
+CONFIG_DIR = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), "atrium")
 USER_CONFIG = os.path.join(CONFIG_DIR, "config.lua")
 STARTER = os.path.join(HERE, "config", "starter.lua") if os.path.exists(os.path.join(HERE, "config", "starter.lua")) \
     else os.path.join(ROOT, "config", "starter.lua")
 START_SH = os.path.join(ROOT, "start.sh")                  # checkout only
-LOG_PATH = os.path.join(CONFIG_DIR, "glassd.log")
+LOG_PATH = os.path.join(CONFIG_DIR, "atriumd.log")
 
 
 def _ok(msg): print("  ✓ " + msg)
@@ -263,35 +263,35 @@ def daemon_up():
 
 
 def start_daemon(lan=True):
-    """Start glassd detached. A checkout has start.sh (port-guarded, logs under
-    the repo); an installed package runs `glasshouse daemon` under nohup."""
+    """Start atriumd detached. A checkout has start.sh (port-guarded, logs under
+    the repo); an installed package runs `atrium daemon` under nohup."""
     if daemon_up():
         return "daemon already listening on %d" % PORT
     if os.path.exists(START_SH):
         r = subprocess.run([START_SH] + (["--lan"] if lan else []), capture_output=True, text=True)
         return (r.stdout.strip() or r.stderr.strip())
     os.makedirs(CONFIG_DIR, exist_ok=True)
-    env = dict(os.environ, GLASSHOUSE_BIND="0.0.0.0" if lan else "127.0.0.1")
+    env = dict(os.environ, ATRIUM_BIND="0.0.0.0" if lan else "127.0.0.1")
     with open(LOG_PATH, "ab") as log:
-        subprocess.Popen([sys.executable, "-m", "glassd.cli", "daemon"] + (["--lan"] if lan else []),
+        subprocess.Popen([sys.executable, "-m", "atriumd.cli", "daemon"] + (["--lan"] if lan else []),
                          stdout=log, stderr=log, stdin=subprocess.DEVNULL,
                          start_new_session=True, env=env)
     import time
     for _ in range(20):
         if daemon_up():
-            return "glassd started on %s:%d" % ("0.0.0.0" if lan else "127.0.0.1", PORT)
+            return "atriumd started on %s:%d" % ("0.0.0.0" if lan else "127.0.0.1", PORT)
         time.sleep(0.25)
-    return "glassd did not answer — see " + LOG_PATH
+    return "atriumd did not answer — see " + LOG_PATH
 
 
 def cmd_daemon(a):
     """Run the daemon in the foreground (what autostart and start_daemon use)."""
     if a.lan:
-        os.environ["GLASSHOUSE_BIND"] = "0.0.0.0"
-    # ⚠️ `import glassd` here would give the PACKAGE (this directory), not the
-    # daemon module glassd/glassd.py that shares its name. Load the file itself.
+        os.environ["ATRIUM_BIND"] = "0.0.0.0"
+    # ⚠️ `import atriumd` here would give the PACKAGE (this directory), not the
+    # daemon module atriumd/atriumd.py that shares its name. Load the file itself.
     import importlib.util
-    spec = importlib.util.spec_from_file_location("glassd_daemon", os.path.join(HERE, "glassd.py"))
+    spec = importlib.util.spec_from_file_location("atriumd_daemon", os.path.join(HERE, "atriumd.py"))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod.main()
@@ -302,7 +302,7 @@ def _autostart_installed():
         out = subprocess.run(["crontab", "-l"], capture_output=True, text=True, timeout=5).stdout
     except Exception:
         return False
-    return "# glasshouse" in out
+    return "# atrium" in out
 
 
 def install_autostart(dry_run=False):
@@ -314,9 +314,9 @@ def install_autostart(dry_run=False):
         "No medium" not in subprocess.run(["systemctl", "--user", "is-system-running"],
                                           capture_output=True, text=True).stderr
     if have_user_bus:
-        unit = os.path.join(unit_dir, "glasshouse.service")
-        text = ("[Unit]\nDescription=Glasshouse daemon\nAfter=network-online.target\n\n"
-                "[Service]\nExecStart=%s -m glassd.cli daemon --lan\nRestart=on-failure\n\n"
+        unit = os.path.join(unit_dir, "atrium.service")
+        text = ("[Unit]\nDescription=Atrium daemon\nAfter=network-online.target\n\n"
+                "[Service]\nExecStart=%s -m atriumd.cli daemon --lan\nRestart=on-failure\n\n"
                 "[Install]\nWantedBy=default.target\n" % sys.executable)
         if dry_run:
             return "would write %s and enable it" % unit
@@ -324,14 +324,14 @@ def install_autostart(dry_run=False):
         with open(unit, "w") as f:
             f.write(text)
         subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
-        subprocess.run(["systemctl", "--user", "enable", "--now", "glasshouse.service"], capture_output=True)
+        subprocess.run(["systemctl", "--user", "enable", "--now", "atrium.service"], capture_output=True)
         return "systemd user unit %s enabled" % unit
     if _autostart_installed():
         return "cron entries already present"
     starter = ("%s --lan" % START_SH) if os.path.exists(START_SH) else \
-        ("%s -m glassd.cli up" % sys.executable)
-    lines = ["@reboot sleep 20 && %s # glasshouse" % starter,
-             "*/5 * * * * %s >/dev/null 2>&1 # glasshouse keeper" % starter]
+        ("%s -m atriumd.cli up" % sys.executable)
+    lines = ["@reboot sleep 20 && %s # atrium" % starter,
+             "*/5 * * * * %s >/dev/null 2>&1 # atrium keeper" % starter]
     if dry_run:
         return "would add to crontab: " + " | ".join(lines)
     cur = subprocess.run(["crontab", "-l"], capture_output=True, text=True).stdout
@@ -342,7 +342,7 @@ def install_autostart(dry_run=False):
 
 def cmd_init(a):
     auto = True if a.yes else None
-    print("Glasshouse setup — every step skips what is already done.")
+    print("Atrium setup — every step skips what is already done.")
 
     _step("1. Checks")
     tm = subprocess.run(["tmux", "-V"], capture_output=True, text=True).stdout if _which("tmux") else ""
@@ -377,7 +377,7 @@ def cmd_init(a):
     found = agents.installed()
     if not found:
         _warn("none found on $PATH. Install one (claude, codex, gemini, aider, opencode…) and re-run;")
-        _warn("Glasshouse still shows any of them the moment they run inside tmux.")
+        _warn("Atrium still shows any of them the moment they run inside tmux.")
     for h, path in sorted(found.items()):
         tier = "exact (hooks available)" if h in hooks.INSTALLERS else "heuristic (no hooks system)"
         _ok("%-12s %s — %s" % (h, path, tier))
@@ -394,7 +394,7 @@ def cmd_init(a):
             if st.status == "installed":
                 _ok("%s already hooked" % h); continue
             if st.status == "invalid":
-                _warn("%s: %s is not valid JSON — fix it, then `glasshouse hooks install %s`" % (h, st.path, h)); continue
+                _warn("%s: %s is not valid JSON — fix it, then `atrium hooks install %s`" % (h, st.path, h)); continue
             if _ask("Install hooks for %s (%s)?" % (h, st.path), True, auto):
                 r = inst.apply(dry_run=a.dry_run)
                 _ok("%s: %s%s" % (h, ", ".join(r.changes) or "nothing to do",
@@ -406,7 +406,7 @@ def cmd_init(a):
     if a.dry_run:
         _ok("%s %s" % (USER_CONFIG, "exists" if os.path.exists(USER_CONFIG) else "would be created from the starter"))
     elif ensure_config():
-        _ok("wrote %s (all defaults, commented) — `glasshouse config` opens it" % USER_CONFIG)
+        _ok("wrote %s (all defaults, commented) — `atrium config` opens it" % USER_CONFIG)
     else:
         _ok("%s exists, left alone" % USER_CONFIG)
 
@@ -432,10 +432,10 @@ def cmd_init(a):
 
     _step("7. Pair the headset")
     if a.dry_run or not daemon_up():
-        print("  (run `glasshouse pair` when the daemon is up)")
+        print("  (run `atrium pair` when the daemon is up)")
     else:
         cmd_pair(a)
-    print("Next: open Glasshouse in the headset and enter the code. Then `glasshouse start claude` "
+    print("Next: open Atrium in the headset and enter the code. Then `atrium start claude` "
           "(or any harness) on this computer.")
     return 0
 
@@ -449,14 +449,14 @@ def cmd_start(a):
     t = agents.table()
     row = t.get(a.harness)
     if row is None:
-        # Allow a raw command too: `glasshouse start ./my-agent.sh`
+        # Allow a raw command too: `atrium start ./my-agent.sh`
         if _which(a.harness) or os.path.exists(a.harness):
             row = {"match": [a.harness]}
         else:
-            sys.exit("glasshouse start: unknown harness %r — one of: %s" % (a.harness, ", ".join(sorted(t))))
+            sys.exit("atrium start: unknown harness %r — one of: %s" % (a.harness, ", ".join(sorted(t))))
     exe = next((m for m in row["match"] if _which(m)), None)
     if exe is None:
-        sys.exit("glasshouse start: %s is not on $PATH" % " / ".join(row["match"]))
+        sys.exit("atrium start: %s is not on $PATH" % " / ".join(row["match"]))
     d = os.path.abspath(os.path.expanduser(a.dir or "."))
     base = os.path.basename(d.rstrip("/")) or "home"
     name = a.name or ("%s-%s" % (a.harness if a.harness in t else base, base) if a.harness in t else base)
@@ -472,7 +472,7 @@ def cmd_start(a):
     r = subprocess.run(["tmux", "new-session", "-d", "-s", name, "-c", d] + cmd,
                        capture_output=True, text=True)
     if r.returncode != 0:
-        sys.exit("glasshouse start: tmux failed: " + (r.stderr.strip() or r.stdout.strip()))
+        sys.exit("atrium start: tmux failed: " + (r.stderr.strip() or r.stdout.strip()))
     print("started %s in %s (tmux session %r)" % (" ".join(cmd), d, name))
     if a.detach:
         return 0
@@ -520,7 +520,7 @@ def cmd_pin(a):
     key = a.session
     if not key:
         if not os.environ.get("TMUX"):
-            print("not inside tmux — name the session: glasshouse pin %s <session>" % a.action,
+            print("not inside tmux — name the session: atrium pin %s <session>" % a.action,
                   file=sys.stderr)
             return 2
         key = _tmux("display-message", "-p", "#S")
@@ -546,7 +546,7 @@ def cmd_pin(a):
             _tmux("set-option", "-w", "-u", "-t", key, _pin.PREV_OPT)
             print("%s: restored to %sx%s" % (key, cols, rows))
         print("%s: the headset will never resize this session (shows a crop instead)" % key)
-        print("   undo with: glasshouse pin on %s" % key)
+        print("   undo with: atrium pin on %s" % key)
     else:
         _tmux("set-option", "-w", "-u", "-t", key, _pin.PIN_OPT)
         print("%s: the headset may resize this session while watching it" % key)
@@ -605,7 +605,7 @@ def cmd_preset(a):
         for name, what in PRESETS.items():
             print("%s %-12s %s" % ("*" if name == live else " ", name, what))
         if mode == "custom":
-            print("* %-12s %s" % ("custom", "your own .glb — see `glasshouse pack`"))
+            print("* %-12s %s" % ("custom", "your own .glb — see `atrium pack`"))
         print("\nin use: %s   (%s)" % (live or "?", USER_CONFIG))
         return 0
 
@@ -688,8 +688,8 @@ def cmd_doctor(a):
 
 
 def main(argv=None):
-    """Entry point for `glasshouse` (installed) and bin/glasshouse (checkout)."""
-    ap = argparse.ArgumentParser(prog="glasshouse", description=__doc__,
+    """Entry point for `atrium` (installed) and bin/atrium (checkout)."""
+    ap = argparse.ArgumentParser(prog="atrium", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
 

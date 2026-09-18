@@ -47,13 +47,13 @@ def main(argv):
         io.write = function(...)
             for _, s in ipairs({...}) do __out[#__out + 1] = tostring(s) end
         end
-        os.exit = function() error("__glasshouse_exit__", 0) end
+        os.exit = function() error("__atrium_exit__", 0) end
     """)
     fn = lua.eval("function(...) " + src + "\nend")
     try:
         fn(config_dir, user_path)
     except LuaError as e:
-        if "__glasshouse_exit__" not in str(e):
+        if "__atrium_exit__" not in str(e):
             sys.stdout.write('{"ok":false,"error":%s}' % _q("lua: " + str(e)))
             return 0
     out = lua.globals()["__out"]

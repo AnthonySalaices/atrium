@@ -3,7 +3,7 @@ extends Node3D
 ## One real terminal panel, live from a tmux session on the host.
 ##
 ## Geometry comes from the Lua config the daemon serves, so changing
-## ~/.config/glasshouse/config.lua restyles this without a rebuild.
+## ~/.config/atrium/config.lua restyles this without a rebuild.
 
 ## Which tmux session to show. Put yours in `godot/data/session.txt` (gitignored).
 ## ⏳ This belongs in the Lua config, which means subscribing only after the first
@@ -11,7 +11,7 @@ extends Node3D
 const SESSION_FALLBACK := "main"
 var session := SESSION_FALLBACK
 
-## The host running glassd. ⚠️ Deliberately NOT in source — put your own address in
+## The host running atriumd. ⚠️ Deliberately NOT in source — put your own address in
 ## `godot/data/host.txt` before building (see `data/host.txt.example`). The APK
 ## has to know where to connect before it can be told anything over the wire,
 ## which is what the first-run pairing flow will eventually replace.
@@ -39,7 +39,7 @@ var title_left: Label
 var title_right: Label
 var link_text := ""              # non-empty while not connected
 
-# Sessions that opted out of pinning (`glasshouse pin off`) are never resized on
+# Sessions that opted out of pinning (`atrium pin off`) are never resized on
 # the host; we get the bottom-left crop of a desktop-sized pane instead, flagged
 # `cropped: [cols, rows]`. Say so in the strip — without it the missing right-hand
 # columns read as a rendering bug. Keyed by session: a late frame from the one we
@@ -59,7 +59,7 @@ var pulse_enabled := true
 var _t := 0.0
 
 # The host sends sessions in a STABLE order (by name, never by urgency) so a
-# panel never moves because it became urgent — see glassd/focus.py. Cycling walks
+# panel never moves because it became urgent — see atriumd/focus.py. Cycling walks
 # that order locally; `focus_key` is the host's "who has waited longest" pick.
 var known: Array = []
 var focus_key := ""

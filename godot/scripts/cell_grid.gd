@@ -10,7 +10,7 @@ class_name CellGrid
 const DEFAULT = -1
 const RGB_FLAG = 0x1000000
 
-# attribute bits, matching glassd/sgr.py
+# attribute bits, matching atriumd/sgr.py
 const BOLD = 1
 const DIM = 2
 const ITALIC = 4
@@ -96,7 +96,7 @@ func clear() -> void:
 	queue_redraw()
 
 
-## Apply one frame from glassd. base == 0 means a full frame.
+## Apply one frame from atriumd. base == 0 means a full frame.
 func apply_frame(msg: Dictionary) -> void:
 	var c: int = int(msg.get("cols", cols))
 	var r: int = int(msg.get("rows", rows))

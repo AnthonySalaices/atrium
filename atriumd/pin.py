@@ -9,14 +9,14 @@ Restore fires on: unsubscribe, client disconnect, a silence watchdog, daemon
 exit (SIGTERM/SIGINT), daemon start (`recover`), and tools/unpin.sh as a
 manual escape hatch.
 
-⚠️ The restore record lives ON THE TMUX WINDOW (`@glasshouse_prev`), not only
+⚠️ The restore record lives ON THE TMUX WINDOW (`@atrium_prev`), not only
 in this process. 9/17 the daemon was restarted while a window was pinned; the
 new process saw "80x28, manual" as the previous geometry and could never put
 the desktop back — the user's desktop session stayed shrunk. A tmux user option
 survives us; an in-memory dict does not.
 
-A window can opt out of pinning entirely: `tmux set -w @glasshouse_pin off`
-(`glasshouse pin off`). The headset then receives a crop of the desktop-sized
+A window can opt out of pinning entirely: `tmux set -w @atrium_pin off`
+(`atrium pin off`). The headset then receives a crop of the desktop-sized
 pane instead (see screen.crop_frame).
 """
 
@@ -33,8 +33,8 @@ TMUX = "/usr/bin/tmux"
 # daily pane still comes back if the headset really is gone.
 SILENCE_TIMEOUT = 600.0
 
-PIN_OPT = "@glasshouse_pin"     # user-set on a window: "off" = never resize this one
-PREV_OPT = "@glasshouse_prev"   # daemon-set: "<window-size>|<cols>|<rows>", "-" = unset
+PIN_OPT = "@atrium_pin"     # user-set on a window: "off" = never resize this one
+PREV_OPT = "@atrium_prev"   # daemon-set: "<window-size>|<cols>|<rows>", "-" = unset
 
 _lock = threading.Lock()
 _pinned = {}                  # key -> {"size": str, "cols": int, "rows": int, "seen": float}
@@ -60,7 +60,7 @@ def _get_window_size(key):
 
 
 def opted_out(key):
-    """True when the window carries `@glasshouse_pin off`."""
+    """True when the window carries `@atrium_pin off`."""
     v = _tmux(["show-options", "-w", "-v", "-t", key, PIN_OPT])
     return (v or "").strip().lower() in ("off", "0", "no", "false")
 

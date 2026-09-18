@@ -14,7 +14,7 @@ full-screen TUI, which is the case that breaks naive scrapers.
 
 So the split is:
 
-- **host (`glassd/`)** — captures panes, parses SGR into styled cells, diffs row by row, runs the
+- **host (`atriumd/`)** — captures panes, parses SGR into styled cells, diffs row by row, runs the
   session state machine, evaluates the Lua config, validates and forwards keystrokes.
 - **headset (`godot/`)** — paints cells into a `SubViewport`, hands that viewport to an
   `OpenXRCompositionLayerQuad`, and sends key events back.
@@ -64,9 +64,9 @@ the list does.
 
 "Provider" is the wrong axis; "harness" is the right one. Claude, GPT, DeepSeek and Qwen are
 models; what sits in a tmux pane is a *harness* (Claude Code, Codex CLI, Gemini CLI, aider,
-OpenCode, …), and one harness can front several models. Glasshouse recognises harnesses by the
+OpenCode, …), and one harness can front several models. Atrium recognises harnesses by the
 process in the pane and never touches a model or an API key. Supporting a new provider is
-therefore a row in a table (`glassd/agents.py`, extendable from `agents.extra` in the config),
+therefore a row in a table (`atriumd/agents.py`, extendable from `agents.extra` in the config),
 not an integration.
 
 Three tiers of "the agent needs you":
@@ -75,10 +75,10 @@ Three tiers of "the agent needs you":
 |---|---|---|
 | 3 universal | the pane's process tree contains a known harness; the last lines of the pane are scraped for that harness's prompt phrases | heuristic, rendered dimmer |
 | 2 hooks | the harness reports events (Claude Code hooks, Codex `notify`) through a fire-and-forget UDP shim | exact |
-| 1 user shim | anything calls `glasshouse notify <session> <state>` | exact |
+| 1 user shim | anything calls `atrium notify <session> <state>` | exact |
 
-Tier 2 installers live in `glassd/hooks.py`, one class per harness behind one interface
-(`bin/glasshouse hooks status|install|uninstall [harness]`): Claude Code and Codex share
+Tier 2 installers live in `atriumd/hooks.py`, one class per harness behind one interface
+(`bin/atrium hooks status|install|uninstall [harness]`): Claude Code and Codex share
 Claude's event names, Gemini CLI (and Qwen Code, its fork) use `BeforeAgent`/`AfterAgent`
 with millisecond timeouts and a named entry. Every installer backs up, merges, re-parses before
 replacing, is idempotent and removes only its own entries. ⚠️ Codex only loads hooks with
@@ -91,7 +91,7 @@ patterns are an optional filter, never the discovery mechanism.
 
 ## Pairing
 
-The APK carries no host and no secret. On the host, `glasshouse pair` asks the daemon (over the
+The APK carries no host and no secret. On the host, `atrium pair` asks the daemon (over the
 authenticated API) for a **6-digit code, valid ten minutes, single use**, and prints it with the
 LAN address. In the headset, the first-run card broadcasts a UDP discovery ping — every daemon
 on the network answers with its hostname, no secrets either way — and the user picks a host and
@@ -108,7 +108,7 @@ header. Client → host operations:
 
 | op | meaning |
 |---|---|
-| `subscribe` | start streaming a session; optionally pin it to `cols` × `rows` (a session with `@glasshouse_pin off` or matching `sessions.pin_exclude` is never resized — the client gets a bottom-left crop instead, flagged `cropped: [cols, rows]` on every frame, which it shows in the title strip) |
+| `subscribe` | start streaming a session; optionally pin it to `cols` × `rows` (a session with `@atrium_pin off` or matching `sessions.pin_exclude` is never resized — the client gets a bottom-left crop instead, flagged `cropped: [cols, rows]` on every frame, which it shows in the title strip) |
 | `unsubscribe` | stop, and restore the window's previous geometry |
 | `resync` | ask for a full frame instead of a diff (after a local rebuild) |
 | `keys` | type — see below |
@@ -145,7 +145,7 @@ Two safety properties, both deliberate:
 everything else, with an `ETag` of mtime and size so the headset re-downloads a room only when it
 actually changed. ⛔ **The path comes from the config, never from the URL** — the request carries
 no name to traverse with, and a daemon that already streams every agent's terminal is a bad place
-to grow a general file server. `glasshouse pack` copies the `.glb` into the config directory
+to grow a general file server. `atrium pack` copies the `.glb` into the config directory
 rather than referencing it where it sits, so tidying a Downloads folder cannot empty the room
 mid-session. Only self-contained `.glb` is accepted: a `.gltf` with sidecar textures would need a
 base path, which is exactly the ambiguity this route refuses to have.
@@ -364,10 +364,10 @@ Vendor option names are effectively undocumented; extract them from the plugin b
 - ⚠️ **The restore record must outlive the daemon.** Restarting the daemon while a window was
   pinned once made the new process record the *pinned* geometry as "previous", so every restore
   afterwards put the window back to 80x28. The record is now a tmux user option on the window
-  (`@glasshouse_prev = "<window-size>|<cols>|<rows>"`): a new daemon adopts it instead of what
+  (`@atrium_prev = "<window-size>|<cols>|<rows>"`): a new daemon adopts it instead of what
   tmux reports, `recover()` restores leftovers at start, and SIGTERM/SIGINT restore before exit.
 - ⚠️ **A tmux window has one size for every attached client.** Pinning a session the user is also
-  looking at on a desktop shrinks it there too. `glasshouse pin off` (`@glasshouse_pin off`) or
+  looking at on a desktop shrinks it there too. `atrium pin off` (`@atrium_pin off`) or
   `sessions.pin_exclude` opts a session out; the host then serves `screen.crop_frame` — the
   bottom `rows` lines and leftmost `cols` cells — so the headset panel keeps its geometry.
 - ⚠️ **A resize reflows the normal screen, never the alternate one.** Output printed *after*
@@ -384,7 +384,7 @@ Vendor option names are effectively undocumented; extract them from the plugin b
 ## Config evaluation
 
 `config/eval.lua` loads `config/default.lua`, deep-merges the user's table over it, and prints
-JSON. `glassd/config.py` runs that, validates and clamps, and watches for changes.
+JSON. `atriumd/config.py` runs that, validates and clamps, and watches for changes.
 
 ⚠️ **An empty Lua table is both an empty list and an empty map.** Over a map it must mean "change
 nothing" — a config with every line commented out evaluates to `{}` and must not wipe the

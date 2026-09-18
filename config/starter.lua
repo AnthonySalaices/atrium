@@ -1,4 +1,4 @@
--- Glasshouse config. Edit and save — the headset restyles live, no rebuild.
+-- Atrium config. Edit and save — the headset restyles live, no rebuild.
 -- Everything here is optional: whatever you leave out keeps the shipped default.
 -- The full list of what you can set, with a comment on each key, is in
 -- config/default.lua next to the daemon — copy any block from there and change it.
@@ -15,11 +15,11 @@ return {
   -- Text size is angular (dmm), so it holds at any panel distance. Floor is 18.
   -- font = { size_dmm = 22.3 },
 
-  -- Which tmux sessions to show. Glasshouse finds agents by what is running in
+  -- Which tmux sessions to show. Atrium finds agents by what is running in
   -- a pane; these are optional name filters (regular expressions).
   -- sessions = { include = {}, exclude = { "scratch" } },
 
-  -- A terminal program of yours that Glasshouse should treat as an agent.
+  -- A terminal program of yours that Atrium should treat as an agent.
   -- agents = { extra = { mytool = { match = { "mytool" }, needs_input = { "Proceed?" } } } },
 
   -- Room tone. Off by default until the café sound ships.

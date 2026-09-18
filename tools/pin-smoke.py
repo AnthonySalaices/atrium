@@ -4,12 +4,12 @@
 Drives the real WebSocket against two throwaway tmux sessions:
   * a normal one must shrink to the headset's cols x rows while subscribed,
     carry a restore record on the window, and come back on unsubscribe;
-  * an opted-out one (`@glasshouse_pin off`) must keep its desktop size and
+  * an opted-out one (`@atrium_pin off`) must keep its desktop size and
     stream a cropped frame instead.
 
-    tools/pin-smoke.py            # against a running glassd on 127.0.0.1:7570
+    tools/pin-smoke.py            # against a running atriumd on 127.0.0.1:7570
 
-⚠️ It creates and kills its own tmux sessions (`glasshouse-pinsmoke-*`) and
+⚠️ It creates and kills its own tmux sessions (`atrium-pinsmoke-*`) and
 never touches any other session.
 """
 
@@ -20,7 +20,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _ws import WS, tmux, token          # noqa: E402
 
-NORMAL, OPTOUT = "glasshouse-pinsmoke-a", "glasshouse-pinsmoke-b"
+NORMAL, OPTOUT = "atrium-pinsmoke-a", "atrium-pinsmoke-b"
 LONG = "0123456789" * 15          # 150 chars: 80 + 70 when the pane is 80 wide
 fails = []
 
@@ -62,7 +62,7 @@ def main():
     tok = token()
     make(NORMAL)
     make(OPTOUT)
-    tmux("set-option", "-w", "-t", OPTOUT, "@glasshouse_pin", "off")
+    tmux("set-option", "-w", "-t", OPTOUT, "@atrium_pin", "off")
     try:
         ws = WS("/ws?token=" + tok)
         check(ws.wait_for("snapshot") is not None, "snapshot on connect")
@@ -73,8 +73,8 @@ def main():
               str(f and (f["cols"], f["rows"])))
         time.sleep(0.3)
         check(geometry(NORMAL) == "80x28", "normal: window pinned to 80x28", geometry(NORMAL))
-        check(opt(NORMAL, "@glasshouse_prev") == "manual|200|50", "normal: restore record on the window",
-              opt(NORMAL, "@glasshouse_prev"))
+        check(opt(NORMAL, "@atrium_prev") == "manual|200|50", "normal: restore record on the window",
+              opt(NORMAL, "@atrium_prev"))
         check("cropped" not in f, "normal: frame is not a crop")
 
         ws.send({"op": "subscribe", "key": OPTOUT, "cols": 80, "rows": 28})
@@ -89,12 +89,12 @@ def main():
                                     for l in f["lines"]), "opt-out: every cropped row is 80 wide")
         time.sleep(0.3)
         check(geometry(OPTOUT) == "200x50", "opt-out: window untouched", geometry(OPTOUT))
-        check(opt(OPTOUT, "@glasshouse_prev") == "", "opt-out: no restore record written")
+        check(opt(OPTOUT, "@atrium_prev") == "", "opt-out: no restore record written")
 
         ws.send({"op": "unsubscribe", "key": NORMAL})
         time.sleep(0.5)
         check(geometry(NORMAL) == "200x50", "normal: restored on unsubscribe", geometry(NORMAL))
-        check(opt(NORMAL, "@glasshouse_prev") == "", "normal: record cleared after restore")
+        check(opt(NORMAL, "@atrium_prev") == "", "normal: record cleared after restore")
 
         # ⭐ The 9/17 question: after a re-pin, does output printed AFTERWARDS
         # still wrap at the headset's width, or does it run off the right edge?

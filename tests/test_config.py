@@ -1,5 +1,5 @@
 import os, sys, tempfile, unittest
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "glassd"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "atriumd"))
 import config
 
 

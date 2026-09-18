@@ -1,4 +1,4 @@
-"""glassd — the Glasshouse host daemon and CLI, as an installable package.
+"""atriumd — the Atrium host daemon and CLI, as an installable package.
 
 The modules in here import each other by bare name (`import agents`) because
 the daemon grew up as a directory of scripts and still runs that way from a

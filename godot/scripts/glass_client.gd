@@ -1,7 +1,7 @@
 extends Node
 class_name GlassClient
 
-## WebSocket link to glassd on the host.
+## WebSocket link to atriumd on the host.
 ##
 ## Godot's built-in WebSocketPeer — no addon, no native dependency. That is the
 ## whole point of the architecture: the host does the terminal emulation, this
@@ -59,7 +59,7 @@ var want_cols := 0
 var want_rows := 0
 
 
-## Ask the host to resize the tmux window to our panel geometry. glassd records
+## Ask the host to resize the tmux window to our panel geometry. atriumd records
 ## the previous size and restores it on unsubscribe, disconnect or silence.
 func subscribe(key: String, cols := 0, rows := 0) -> void:
 	want_cols = cols

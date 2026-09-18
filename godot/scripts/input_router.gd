@@ -3,7 +3,7 @@ class_name InputRouter
 
 ## M4 — physical keyboard -> tmux, via the link that already carries the pixels.
 ##
-## Godot key events become a small ordered list of items that glassd/keys.py
+## Godot key events become a small ordered list of items that atriumd/keys.py
 ## validates and hands to `tmux send-keys`:
 ##
 ##     [{"l": "ls -la"}, {"k": "Enter"}]

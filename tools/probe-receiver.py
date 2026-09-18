@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Write-only probe receiver for the spike APK.
 
-Deliberately NOT part of glassd. glassd streams terminal contents and stays on
+Deliberately NOT part of atriumd. atriumd streams terminal contents and stays on
 loopback; this accepts results from the headset and nothing else, so it is the
 only thing that ever binds the LAN during a headset window.
 

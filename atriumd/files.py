@@ -7,7 +7,7 @@ points at". Anything that makes the path request-derived puts this daemon, which
 already streams every agent's terminal, one bug away from serving the filesystem.
 
 The route sits behind the same token as everything else (see `authed` in
-glassd.py); this module only decides *whether* there is a file and *which* one.
+atriumd.py); this module only decides *whether* there is a file and *which* one.
 """
 
 import os

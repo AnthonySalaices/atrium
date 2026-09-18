@@ -9,7 +9,7 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PRESET="${1:-Quest}"
-OUT="${2:-build/glasshouse.apk}"
+OUT="${2:-build/atrium.apk}"
 BT="36.1.0"
 
 # shellcheck source=/dev/null

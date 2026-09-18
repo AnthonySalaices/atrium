@@ -1,6 +1,6 @@
 # Releasing the host package
 
-`pip install glasshouse` installs the **host side** only: the daemon, the CLI and the Lua config
+`pip install atrium` installs the **host side** only: the daemon, the CLI and the Lua config
 files. The headset app is an APK built separately (`tools/build-apk.sh`) and distributed
 separately — nothing in this document touches it.
 
@@ -11,7 +11,7 @@ be reused, even after a delete.
 ## The version has exactly one home
 
 `pyproject.toml`'s `version` field. Nothing else in the tree hard-codes it, so a bump is a
-one-line change and there is no second place to forget. `pip show glasshouse` is how you read it
+one-line change and there is no second place to forget. `pip show atrium` is how you read it
 back from an install.
 
 Semantics, given what this is:
@@ -41,8 +41,8 @@ Then, because this repo is public and the daemon is the most work-revealing serv
 git diff origin/main | grep -i -E "hostname|192\.168|10\.|token|\.local"   # expect nothing
 ```
 
-Check that `config/default.lua` still documents every key `glassd/config.py` validates, and that
-`README.md`'s command list matches `glasshouse --help`.
+Check that `config/default.lua` still documents every key `atriumd/config.py` validates, and that
+`README.md`'s command list matches `atrium --help`.
 
 ## Build
 
@@ -59,16 +59,16 @@ rm -rf dist
 installed. Both artifacts should appear:
 
 ```
-dist/glasshouse-X.Y.Z-py3-none-any.whl
-dist/glasshouse-X.Y.Z.tar.gz
+dist/atrium-X.Y.Z-py3-none-any.whl
+dist/atrium-X.Y.Z.tar.gz
 ```
 
 ### Verify the wheel before anyone else gets it
 
 ```bash
 python3 -m venv /tmp/fresh && /tmp/fresh/bin/pip install dist/*.whl
-/tmp/fresh/bin/glasshouse doctor
-/tmp/fresh/bin/glasshouse preset list        # proves the Lua files came along
+/tmp/fresh/bin/atrium doctor
+/tmp/fresh/bin/atrium preset list        # proves the Lua files came along
 ```
 
 ⚠️ **The Lua config files are force-included into the wheel** (`[tool.hatch.build.targets.wheel.force-include]`)
@@ -76,7 +76,7 @@ because they live at the repo root for humans to read. If `preset list` or `doct
 evaluate a config from a clean install, that mapping is what broke — the daemon looks for them
 next to `config.py`.
 
-⚠️ **`import glassd` inside the package is the package, not `glassd.py`.** `cli.py` loads the
+⚠️ **`import atriumd` inside the package is the package, not `atriumd.py`.** `cli.py` loads the
 daemon module by path for exactly this reason; a "tidy-up" that turns it into a normal import
 works in a checkout and fails from a wheel.
 
@@ -94,7 +94,7 @@ streamed to a headset.
 ## After
 
 ```bash
-git tag -a vX.Y.Z -m "glasshouse X.Y.Z" && git push origin vX.Y.Z
+git tag -a vX.Y.Z -m "atrium X.Y.Z" && git push origin vX.Y.Z
 ```
 
 Then write the GitHub release notes against that tag, calling out anything a sideloaded APK needs

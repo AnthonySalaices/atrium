@@ -1,4 +1,4 @@
-# ⛔ SECRET — the glassd auth token. It is copied into the APK at build time and
+# ⛔ SECRET — the atriumd auth token. It is copied into the APK at build time and
 # it grants read access to every agent terminal on the host. It must never be
 # committed, least of all in a repo meant to be published.
 /godot/data/token.txt

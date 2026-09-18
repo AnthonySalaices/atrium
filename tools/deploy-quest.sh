@@ -9,8 +9,8 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APK="${1:-$ROOT/godot/build/glasshouse.apk}"
-PKG="io.github.anthonysalaices.glasshouse"
+APK="${1:-$ROOT/godot/build/atrium.apk}"
+PKG="io.github.anthonysalaices.atrium"
 # Your headset's address. Set QUEST_ADDR, or leave it and the first device adb
 # already knows about is used.
 QUEST="${QUEST_ADDR:-$(adb devices 2>/dev/null | awk 'NR>1 && $2=="device" {print $1; exit}')}"

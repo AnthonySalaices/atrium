@@ -10,7 +10,7 @@ class_name Backdrop
 ##       preset = "nebula"  the procedural sky that shipped first
 ##       preset = "void"    flat dark
 ##   mode = "custom"       -> your own .glb, fetched from the daemon at runtime
-##                          (`backdrop.custom.glb` on the host; `glasshouse pack`)
+##                          (`backdrop.custom.glb` on the host; `atrium pack`)
 ##
 ## ⭐ Glass is for the windows only; nothing here is glass.
 ##

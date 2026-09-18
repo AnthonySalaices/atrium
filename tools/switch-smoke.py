@@ -24,7 +24,7 @@ from _ws import WS, tmux, token          # noqa: E402
 
 A, B = "gh-smoke-a", "gh-smoke-b"
 EMIT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                    "glassd", "glow-emit.sh")
+                    "atriumd", "glow-emit.sh")
 
 fails = []
 

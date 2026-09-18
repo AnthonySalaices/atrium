@@ -6,7 +6,7 @@ import sys
 import tempfile
 import unittest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "glassd"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "atriumd"))
 import hooks  # noqa: E402
 
 
@@ -106,7 +106,7 @@ class GeminiCli(Base):
         g = s["hooks"]["Notification"][0]
         self.assertEqual(g["matcher"], "*")
         h = g["hooks"][0]
-        self.assertEqual(h["name"], "glasshouse")
+        self.assertEqual(h["name"], "atrium")
         self.assertEqual(h["timeout"], 5000)                   # milliseconds
         self.assertTrue(h["command"].endswith("glow-emit.sh gemini-cli"))
         self.assertIn("BeforeAgent", s["hooks"])

@@ -1,9 +1,9 @@
--- Glasshouse — baseline design.
+-- Atrium — baseline design.
 --
 -- This file IS the documentation. Copy any block you want to change into your
 -- own config and override just that key:
 --
---     ~/.config/glasshouse/config.lua
+--     ~/.config/atrium/config.lua
 --
 --     local xr = require 'xr'
 --     return {
@@ -12,7 +12,7 @@
 --     }
 --
 -- Your config is merged OVER these defaults, so you only write what differs.
--- It is evaluated on the host running glassd, not in the headset, and re-read the
+-- It is evaluated on the host running atriumd, not in the headset, and re-read the
 -- moment you save — panels restyle live, no rebuild, no reinstall.
 --
 -- Units: text sizes are in **dmm** (1 dmm = 1 milliradian = 0.0573 deg). dmm is
@@ -217,7 +217,7 @@ return {
   -- SESSIONS — which tmux sessions become panels.
   ----------------------------------------------------------------------------
   sessions = {
-    -- Glasshouse finds agents by what is RUNNING in a tmux pane (see `agents`
+    -- Atrium finds agents by what is RUNNING in a tmux pane (see `agents`
     -- below), not by session name. These are optional extra filters on the
     -- session name (regular expressions). Empty = no filter.
     include = {},
@@ -230,7 +230,7 @@ return {
     -- tmux window has ONE size for every attached client — so it shrinks on
     -- your desktop too. Sessions matching these patterns are never resized;
     -- the headset shows the bottom-left crop of the desktop-sized pane
-    -- instead. Same as `glasshouse pin off` inside a session, but permanent.
+    -- instead. Same as `atrium pin off` inside a session, but permanent.
     pin_exclude = {},             -- Python regexes, e.g. { "^cc-1$", "desk" }
   },
 
@@ -239,7 +239,7 @@ return {
   --
   -- "Provider" is the wrong axis. Claude, GPT, DeepSeek, Qwen are models; what
   -- runs in your terminal is a HARNESS (Claude Code, Codex CLI, Gemini CLI,
-  -- aider, OpenCode, …) and one harness can front several models. Glasshouse
+  -- aider, OpenCode, …) and one harness can front several models. Atrium
   -- recognises harnesses by the process in the pane and never needs an API key.
   --
   -- Built in: claude-code, codex, gemini-cli, qwen-code, opencode, aider, crush,

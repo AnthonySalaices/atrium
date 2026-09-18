@@ -9,8 +9,8 @@ TCP  :PORT  clients:  GET /state  -> JSON snapshot
 """
 import base64, hashlib, json, os, re, selectors, socket, struct, subprocess, threading, time
 
-PORT = int(os.environ.get("GLASSHOUSE_PORT", "7570"))
-BIND = os.environ.get("GLASSHOUSE_BIND", "127.0.0.1")
+PORT = int(os.environ.get("ATRIUM_PORT", "7570"))
+BIND = os.environ.get("ATRIUM_BIND", "127.0.0.1")
 PROTO = 1
 STALE_WORKING_S = 900     # working with no event this long -> unknown
 POLL_S = 2.0
@@ -35,7 +35,7 @@ _pair = _pairing.Pairing()
 
 TOKEN_PATH = os.path.join(
     os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")),
-    "glasshouse", "token")
+    "atrium", "token")
 
 
 def load_token():
@@ -46,7 +46,7 @@ def load_token():
     never go behind a public proxy. `auth:none` is an explicit opt-out for a
     loopback-only dev loop, nothing else.
     """
-    if os.environ.get("GLASSHOUSE_AUTH") == "none":
+    if os.environ.get("ATRIUM_AUTH") == "none":
         return None
     try:
         with open(TOKEN_PATH) as f:
@@ -144,7 +144,7 @@ _mirrors_lock = threading.Lock()
 
 
 def pin_excluded(key):
-    """Never resize this window: the tmux option (`glasshouse pin off`) or a
+    """Never resize this window: the tmux option (`atrium pin off`) or a
     `sessions.pin_exclude` pattern in config.lua."""
     if _pin.opted_out(key):
         return True
@@ -222,7 +222,7 @@ def drop(key, reason="ended"):
 def snapshot():
     """Sessions in STABLE order, plus who is waiting longest.
 
-    Order is by name and never by urgency — see glassd/focus.py for why moving a
+    Order is by name and never by urgency — see atriumd/focus.py for why moving a
     panel when it becomes urgent is the wrong trade.
     """
     with _lock:
@@ -275,7 +275,7 @@ def handle_event(ev):
     state = None
 
     if hname == "notify":
-        # Tier 1: `glasshouse notify <session> <state>` from any tool or script.
+        # Tier 1: `atrium notify <session> <state>` from any tool or script.
         # The state is the caller's word for it, validated; nothing is inferred.
         st = str(ev.get("state", ""))
         if st not in STATES:
@@ -342,10 +342,10 @@ def udp_loop():
         try:
             data, addr = s.recvfrom(65535)
             ev = json.loads(data.decode("utf-8", "replace"))
-            if isinstance(ev, dict) and ev.get("glasshouse") == "discover":
+            if isinstance(ev, dict) and ev.get("atrium") == "discover":
                 # First-run discovery: a headset broadcasts, every daemon on the
                 # LAN answers with its name. No secrets in either direction.
-                s.sendto(json.dumps({"glasshouse": "here", "name": socket.gethostname(),
+                s.sendto(json.dumps({"atrium": "here", "name": socket.gethostname(),
                                      "port": PORT, "proto": PROTO}).encode(), addr)
                 continue
             handle_event(ev)
@@ -447,7 +447,7 @@ def serve_conn(conn):
 
         # ── pairing ──────────────────────────────────────────────────────
         # /pair is the ONE unauthenticated route: a 6-digit single-use code
-        # (issued by `glasshouse pair`, which IS authenticated) buys the token.
+        # (issued by `atrium pair`, which IS authenticated) buys the token.
         # Brute force is handled in pairing.py (5 tries, then a 5-minute lock).
         if path.split("?")[0] == "/pair" and method == "POST":
             ok, why = _pair.redeem(str(read_body().get("code", "")))
@@ -477,7 +477,7 @@ def serve_conn(conn):
                           "Connection: Upgrade\r\n"
                           f"Sec-WebSocket-Accept: {acc}\r\n"
                           "Sec-WebSocket-Version: 13\r\n"
-                          "Server: glassd/0.1\r\n\r\n").encode())
+                          "Server: atriumd/0.1\r\n\r\n").encode())
             conn.settimeout(None)
             c = Client(conn, "ws")
             c.send(snapshot())
@@ -713,7 +713,7 @@ TMUX_FMT = ("#{session_name}\t#{pane_id}\t#{pane_current_command}\t#{pane_pid}\t
             "#{window_activity}\t#{pane_title}")
 
 
-# ⛔ Provider-agnostic on purpose: the harness table lives in glassd/agents.py
+# ⛔ Provider-agnostic on purpose: the harness table lives in atriumd/agents.py
 # and the user can extend it from config.lua (`agents.extra`). Nothing about
 # Claude or Codex is special-cased here any more.
 
@@ -792,11 +792,11 @@ def main():
     except Exception as e:
         print(f"config FAILED to load: {e}", flush=True)
     if TOKEN is None:
-        print("⚠️  AUTH DISABLED (GLASSHOUSE_AUTH=none) — loopback only, never expose this",
+        print("⚠️  AUTH DISABLED (ATRIUM_AUTH=none) — loopback only, never expose this",
               flush=True)
     else:
         print(f"auth: token at {TOKEN_PATH}", flush=True)
-    print(f"glassd listening {BIND}:{PORT} (tcp) + udp/{PORT}", flush=True)
+    print(f"atriumd listening {BIND}:{PORT} (tcp) + udp/{PORT}", flush=True)
     while True: time.sleep(3600)
 
 

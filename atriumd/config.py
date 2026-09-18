@@ -1,7 +1,7 @@
 """User config: evaluate Lua on the host, validate, serve as JSON.
 
 WezTerm's model. We ship an opinionated baseline (config/default.lua) and the
-user overrides only what they want in ~/.config/glasshouse/config.lua.
+user overrides only what they want in ~/.config/atrium/config.lua.
 
 ⚠️ The Lua runs HERE, on the host — never in the headset. That keeps the Godot
 client free of native dependencies (a Lua GDExtension would mean an Android NDK
@@ -45,7 +45,7 @@ EVAL = os.path.join(CONFIG_DIR, "eval.lua")
 
 USER_CONFIG = os.path.join(
     os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")),
-    "glasshouse", "config.lua",
+    "atrium", "config.lua",
 )
 
 BACKDROP_MODES = ("passthrough", "default", "custom")

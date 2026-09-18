@@ -52,7 +52,7 @@ const PULSE_HZ := 0.5
 const PULSE_GAIN_LO := 0.85
 const PULSE_GAIN_HI := 1.10
 
-# States that count as "waiting on you" — mirrors glassd/focus.py.
+# States that count as "waiting on you" — mirrors atriumd/focus.py.
 const WAITING_STATES := ["needs-input", "error", "done"]
 
 

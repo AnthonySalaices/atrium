@@ -1,4 +1,4 @@
-# Putting Glasshouse on a Quest
+# Putting Atrium on a Quest
 
 The headset app is not on the Meta store. You sideload it: build the APK (or take one from a
 release), push it over `adb`, and pair it with your host once. Twenty minutes the first time,
@@ -50,30 +50,30 @@ network entirely while it is asleep. Re-arming it means plugging the cable back 
 ## 3. Install
 
 ```bash
-tools/build-apk.sh                   # produces godot/build/glasshouse.apk
+tools/build-apk.sh                   # produces godot/build/atrium.apk
 tools/deploy-quest.sh                # installs, launches, and tees logcat into logs/
 ```
 
 Or by hand:
 
 ```bash
-adb install -r -g godot/build/glasshouse.apk
-adb shell monkey -p io.github.anthonysalaices.glasshouse \
+adb install -r -g godot/build/atrium.apk
+adb shell monkey -p io.github.anthonysalaices.atrium \
     -c android.intent.category.LAUNCHER 1
 ```
 
 `-g` grants the manifest's permissions up front, which saves a prompt in VR.
 
 The app appears under **Library → Unknown Sources** — not in the main app grid. That list is
-alphabetical and easy to miss; Glasshouse is under G.
+alphabetical and easy to miss; Atrium is under G.
 
 ## 4. Start the host and pair
 
 On the computer:
 
 ```bash
-glasshouse up          # or ./start.sh --lan from a checkout
-glasshouse pair        # prints a 6-digit code, valid once
+atrium up          # or ./start.sh --lan from a checkout
+atrium pair        # prints a 6-digit code, valid once
 ```
 
 ⛔ **The daemon must be bound to the LAN.** `./start.sh` alone binds loopback, which the headset
@@ -83,8 +83,8 @@ network…".
 Put the headset on. The first run shows the pairing card:
 
 ```
-Glasshouse
-Run  glasshouse pair  on your computer, then enter the code.
+Atrium
+Run  atrium pair  on your computer, then enter the code.
 
 Found: <your computer> (<address>)   — Tab to accept the first
 Host   ▏
@@ -97,7 +97,7 @@ Code
   press **Enter** again. **Esc** closes the card.
 - A code is valid for **10 minutes** and can be redeemed once. Five wrong codes lock pairing for
   five minutes — the card says so rather than failing silently.
-- The token is stored on the headset (`user://glasshouse.cfg`) and the card does not come back.
+- The token is stored on the headset (`user://atrium.cfg`) and the card does not come back.
 
 > _Screenshot pending: the pairing card as seen in the headset —
 > `docs/img/quest-pairing-card.png`._
@@ -121,9 +121,9 @@ Mac-layout keyboards send ⌘ where a PC sends Ctrl; the app accepts either as t
 | what you see | what it usually is |
 |---|---|
 | "Looking for hosts on this network…" forever | daemon bound to loopback (`./start.sh --lan`), or the headset is on a different network — a guest SSID will not see it |
-| Card says the code is wrong when you are sure it is not | codes live in the daemon's memory: restarting it between `glasshouse pair` and typing the code voids them. Run `glasshouse pair` again |
+| Card says the code is wrong when you are sure it is not | codes live in the daemon's memory: restarting it between `atrium pair` and typing the code voids them. Run `atrium pair` again |
 | App installed but not in the library | look under **Unknown Sources**, not the app grid |
-| Everything works until you take the headset off | doffing backgrounds the app. Putting it back on resumes it; if it does not, `adb shell am start -n io.github.anthonysalaices.glasshouse/.GodotAppLauncher` |
+| Everything works until you take the headset off | doffing backgrounds the app. Putting it back on resumes it; if it does not, `adb shell am start -n io.github.anthonysalaices.atrium/.GodotAppLauncher` |
 | `adb: no devices` after it worked yesterday | wireless adb does not survive a reboot — reconnect with the cable |
 
 Logs from the headset, which is where anything unexplained ends up:

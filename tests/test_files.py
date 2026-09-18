@@ -4,7 +4,7 @@ import tempfile
 import time
 import unittest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "glassd"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "atriumd"))
 import files  # noqa: E402
 
 
