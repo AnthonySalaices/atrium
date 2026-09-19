@@ -64,6 +64,12 @@ func _init() -> void:
 	var hp := b2.desk_hole.global_transform.origin if b2.desk_hole.is_inside_tree() else b2.desk_hole.transform.origin
 	check(hp.is_equal_approx(Vector3(0.3, 1.10 - 0.40, -0.2 - 0.45)),
 			"keyboard view 0.40 m below the eye, 0.45 m ahead: %s" % hp)
+	check(b2.dome != null and b2.dome.visible and b2.dome.material_override is StandardMaterial3D,
+			"void + keyboard view -> an opaque dome")
+	b2.apply({"mode": "default", "default": {"preset": "nebula"}, "passthrough": {"desk_window": true}})
+	check(b2.dome.visible and b2.dome.material_override is ShaderMaterial, "night sky + keyboard view -> the night dome")
+	b2.apply({"mode": "default", "default": {"preset": "nebula"}, "passthrough": {"desk_window": false}})
+	check(not b2.dome.visible, "no keyboard view -> no dome (the sky is enough)")
 	b2.apply({"mode": "passthrough", "passthrough": {"desk_window": true}})
 	check(not b2.desk_window_on() and not b2.desk_hole.visible, "no keyboard view in full passthrough")
 	print("all green" if fails == 0 else "%d FAILED" % fails)
