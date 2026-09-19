@@ -27,6 +27,13 @@ const ROOMS := {
 	"cafe-night": {"scene": "res://backdrops/cafe-night.glb", "clear": Color(0.07, 0.08, 0.16)},
 	"cabin": {"scene": "res://backdrops/cabin.glb", "clear": Color(0.20, 0.12, 0.22)},
 	"library": {"scene": "res://backdrops/library.glb", "clear": Color(0.10, 0.09, 0.08)},
+	# ⭐ One GLB, two places to sit (AS-0008). `seat` names an Empty in the GLB
+	# whose position is 1.20 m below the design eye, facing the view: the room is
+	# offset so that Empty lands where every other room's origin does.
+	"palace-lawn": {"scene": "res://backdrops/palace.glb", "clear": Color(0.55, 0.62, 0.72),
+			"seat": "Seat_Lawn"},
+	"palace-rotunda": {"scene": "res://backdrops/palace.glb", "clear": Color(0.55, 0.62, 0.72),
+			"seat": "Seat_Rotunda"},
 }
 const VOID_COLOR := Color(0.035, 0.030, 0.028)
 const CAFE_CLEAR := Color(0.10, 0.08, 0.07)
@@ -41,6 +48,9 @@ var _anchor := Transform3D.IDENTITY
 
 # Which GLB `room` currently holds, so switching preset <-> custom rebuilds it.
 var _room_kind := ""
+# The inverse of the chosen seat's transform in the room (identity for a room
+# built around its origin), applied under the anchor.
+var _seat_inv := Transform3D.IDENTITY
 
 # A custom backdrop arrives over the same link as the pixels. ⚠️ It is fetched,
 # never bundled: the .glb lives on the HOST (backdrop.custom.glb) and only the
@@ -117,7 +127,7 @@ func anchor(t: Transform3D) -> void:
 	_anchor = Transform3D(Basis.looking_at(fwd.normalized(), Vector3.UP),
 			Vector3(t.origin.x, dy, t.origin.z))
 	if room:
-		room.transform = _anchor
+		room.transform = _anchor * _seat_inv
 	print("[backdrop] anchored: eye %.2f m, room shifted %.2f m" % [t.origin.y, dy])
 
 
@@ -228,6 +238,13 @@ func _ensure_room(kind: String) -> bool:
 	if not ROOMS.has(kind):
 		return false
 	var path: String = ROOMS[kind]["scene"]
+	if room != null and ROOMS.has(_room_kind) and ROOMS[_room_kind]["scene"] == path:
+		# Another seat in the same GLB: move, don't reload.
+		_room_kind = kind
+		_seat_inv = _seat_of(room, str(ROOMS[kind].get("seat", ""))).affine_inverse()
+		room.transform = _anchor * _seat_inv
+		print("[backdrop] %s: same room, new seat" % kind)
+		return true
 	if not ResourceLoader.exists(path):
 		print("[backdrop] %s is not in this build" % path)
 		return false
@@ -241,6 +258,29 @@ func _ensure_room(kind: String) -> bool:
 	return true
 
 
+## The transform of seat Empty `seat_name` relative to the room's root, or
+## identity when the room has none (every room built around its own origin).
+## ⚠️ Only the Y rotation is kept: a tilted Empty would tilt the whole world.
+static func _seat_of(root: Node3D, seat_name: String) -> Transform3D:
+	if seat_name == "":
+		return Transform3D.IDENTITY
+	var seat := root.find_child(seat_name, true, false) as Node3D
+	if seat == null:
+		print("[backdrop] seat %s not found — using the room origin" % seat_name)
+		return Transform3D.IDENTITY
+	var t := Transform3D.IDENTITY
+	var n: Node = seat
+	while n != null and n != root:
+		if n is Node3D:
+			t = (n as Node3D).transform * t
+		n = n.get_parent()
+	var fwd := -t.basis.z
+	fwd.y = 0.0
+	if fwd.length() < 0.001:
+		fwd = Vector3(0, 0, -1)
+	return Transform3D(Basis.looking_at(fwd.normalized(), Vector3.UP), t.origin)
+
+
 ## Put a room in place, replacing whatever was there. One room exists at a time:
 ## two GLBs of baked geometry is a lot of memory for something you cannot see.
 func _install_room(node: Node3D, kind: String) -> void:
@@ -250,7 +290,8 @@ func _install_room(node: Node3D, kind: String) -> void:
 	_players.clear()
 	room = node
 	_room_kind = kind
-	room.transform = _anchor
+	_seat_inv = _seat_of(node, str(ROOMS.get(kind, {}).get("seat", ""))).affine_inverse()
+	room.transform = _anchor * _seat_inv
 	add_child(room)
 	_fix_materials(room)
 	var n := _add_collision(room)
@@ -458,7 +499,10 @@ func _fix_materials(n: Node) -> void:
 		for i in range(n.mesh.get_surface_count()):
 			var m: Material = n.mesh.surface_get_material(i)
 			if m is BaseMaterial3D:
-				m.vertex_color_use_as_albedo = true
+				# ⚠️ Only when the surface HAS colours: a textured mesh without
+				# COLOR_0 multiplied by "vertex colour" can come out black.
+				m.vertex_color_use_as_albedo = \
+						(n.mesh.surface_get_format(i) & Mesh.ARRAY_FORMAT_COLOR) != 0
 				m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	for c in n.get_children():
 		_fix_materials(c)

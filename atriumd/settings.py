@@ -28,6 +28,8 @@ SCENES = (
     ("Café · night", {"backdrop.mode": "default", "backdrop.default.preset": "cafe-night"}),
     ("Lookout cabin", {"backdrop.mode": "default", "backdrop.default.preset": "cabin"}),
     ("Library", {"backdrop.mode": "default", "backdrop.default.preset": "library"}),
+    ("Palace · lawn", {"backdrop.mode": "default", "backdrop.default.preset": "palace-lawn"}),
+    ("Palace · rotunda", {"backdrop.mode": "default", "backdrop.default.preset": "palace-rotunda"}),
     ("Night sky", {"backdrop.mode": "default", "backdrop.default.preset": "nebula"}),
     ("Void", {"backdrop.mode": "default", "backdrop.default.preset": "void"}),
     ("Passthrough", {"backdrop.mode": "passthrough"}),
