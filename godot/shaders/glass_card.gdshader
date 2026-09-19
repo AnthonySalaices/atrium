@@ -90,8 +90,11 @@ void fragment() {
 	// ⛔ Text composites LAST, at its own coverage, with opaque glyph interiors.
 	// Never multiply the text by the glass alpha, never tint it with the edge
 	// colour, and never add the rim after this point.
+	// ⚠️ content is PREMULTIPLIED (GlassUI.bake_content): mipmaps of straight
+	// alpha average white glyphs with the transparent black around them, and
+	// text seen from 1.5 m came out dark grey (9/18).
 	vec4 c = texture(content, UV);
-	rgb = mix(rgb, c.rgb, c.a);
+	rgb = rgb * (1.0 - c.a) + c.rgb;
 	a = mix(a, 1.0, c.a);
 
 	ALBEDO = rgb;

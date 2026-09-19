@@ -210,6 +210,9 @@ static func bake_content(vp: SubViewport, mat: ShaderMaterial, free_vp: bool = t
 	var img := vp.get_texture().get_image()
 	if img == null or img.is_empty():
 		return
+	# Premultiply BEFORE the mipmaps, so each smaller level averages coverage
+	# correctly; glass_card.gdshader composites premultiplied content.
+	img.premultiply_alpha()
 	img.generate_mipmaps()
 	mat.set_shader_parameter("content", ImageTexture.create_from_image(img))
 	if free_vp:
