@@ -53,3 +53,9 @@ __pycache__/
 /dist/
 /build/
 *.egg-info/
+
+# Godot extracts textures embedded in backdrop GLBs on import; regenerated from the .glb.
+godot/backdrops/*.png
+godot/backdrops/*.png.import
+godot/backdrops/*.jpg
+godot/backdrops/*.jpg.import
