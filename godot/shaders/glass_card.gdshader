@@ -53,7 +53,11 @@ uniform float bottom_bias = 0.85;
 // same content. Attention is the material brightening, never a border on top.
 uniform float attention : hint_range(0.0, 1.0) = 0.0;
 
-uniform sampler2D content : source_color, filter_linear_mipmap, hint_default_transparent;
+// ⚠️ Anisotropic: rail cards and buttons are often seen at a slant, and plain
+// trilinear then drops to a tiny mip along the slant — text went dark and
+// blurry "from certain angles" (9/18). content_bias < 0 = a touch sharper.
+uniform sampler2D content : source_color, filter_linear_mipmap_anisotropic, hint_default_transparent;
+uniform float content_bias = -0.5;
 
 float rounded_box(vec2 p, vec2 half_size, float r) {
 	vec2 q = abs(p) - half_size + vec2(r);
@@ -93,7 +97,7 @@ void fragment() {
 	// ⚠️ content is PREMULTIPLIED (GlassUI.bake_content): mipmaps of straight
 	// alpha average white glyphs with the transparent black around them, and
 	// text seen from 1.5 m came out dark grey (9/18).
-	vec4 c = texture(content, UV);
+	vec4 c = texture(content, UV, content_bias);
 	rgb = rgb * (1.0 - c.a) + c.rgb;
 	a = mix(a, 1.0, c.a);
 

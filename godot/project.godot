@@ -10,6 +10,9 @@ config/features=PackedStringArray("4.7", "Mobile")
 
 [rendering]
 
+# UI labels on glass are seen at a slant; 2x (the default) left them blurry.
+textures/default_filters/anisotropic_filtering_level=3
+
 renderer/rendering_method="mobile"
 renderer/rendering_method.mobile="mobile"
 ; 4x MSAA: the owner's first words on the café were "the lines are pixelated on all the
