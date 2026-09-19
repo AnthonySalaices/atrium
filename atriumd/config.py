@@ -188,8 +188,8 @@ def validate(cfg):
     sz = pt.get("desk_window_size_m")
     if not (isinstance(sz, list) and len(sz) == 2
             and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in sz)):
-        sz = [1.2, 0.6]
-    pt["desk_window_size_m"] = [min(max(float(sz[0]), 0.3), 2.0), min(max(float(sz[1]), 0.2), 1.2)]
+        sz = [0.55, 0.24]
+    pt["desk_window_size_m"] = [min(max(float(sz[0]), 0.2), 2.0), min(max(float(sz[1]), 0.1), 1.2)]
     for key, lo, hi, dflt in (("desk_window_pitch_deg", -90.0, 0.0, -35.0),
                               ("desk_window_forward_m", 0.2, 1.0, 0.45),
                               ("desk_window_below_eye_m", 0.1, 0.9, 0.40)):

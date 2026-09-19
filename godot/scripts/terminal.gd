@@ -159,7 +159,11 @@ func _ready() -> void:
 		if k != focus_key:
 			focus_key = k
 			_rebuild_rail())
-	session = _read_data_file("session.txt", SESSION_FALLBACK)
+	client.session_missing.connect(_on_session_missing)
+	# The session you were last on, else the dev build's session.txt. Checked
+	# against the host's list when it arrives (_ensure_session): a session
+	# closed since the last run must not greet you with an error.
+	session = _read_last_session()
 
 	# Where do we connect? user:// (paired) beats res://data (dev build) beats
 	# nothing (show the pairing card).
@@ -796,8 +800,48 @@ func _on_sessions(list: Array) -> void:
 			known.append(item)
 	known = known.filter(func(x): return str(x.get("state", "")) != "gone")
 	known.sort_custom(func(a, b): return str(a.get("key", "")) < str(b.get("key", "")))
+	_ensure_session()
 	_update_status()
 	_rebuild_rail()
+
+
+const LAST_SESSION := "user://last-session.txt"
+
+
+func _read_last_session() -> String:
+	var f := FileAccess.open(LAST_SESSION, FileAccess.READ)
+	if f != null:
+		var v := f.get_as_text().strip_edges()
+		if v != "":
+			return v
+	return _read_data_file("session.txt", SESSION_FALLBACK)
+
+
+func _save_last_session(key: String) -> void:
+	var f := FileAccess.open(LAST_SESSION, FileAccess.WRITE)
+	if f != null:
+		f.store_string(key)
+
+
+## If the session on the panel is not one the host has, move to whoever needs
+## you, else the first one. (Bug 9/18: a stale `cc-vr` from the last run showed
+## "server error: no such tmux target" on every boot.)
+func _ensure_session() -> void:
+	if known.is_empty() or _index_of(session) >= 0:
+		return
+	var next := focus_key if _index_of(focus_key) >= 0 else str(known[0].get("key", ""))
+	if next != "":
+		print("[term] %s is gone — showing %s" % [session, next])
+		switch_to(next)
+
+
+func _on_session_missing(key: String) -> void:
+	if key != session:
+		return
+	var i := _index_of(key)
+	if i >= 0:
+		known.remove_at(i)
+	_ensure_session()
 
 
 func _index_of(key: String) -> int:
@@ -857,6 +901,7 @@ func switch_to(key: String) -> void:
 		web_rect.texture = null
 	_show_surface()
 	client.subscribe(session, cols, rows)
+	_save_last_session(session)
 	_update_status()
 	_rebuild_rail()
 	print("[term] switched to %s" % session)

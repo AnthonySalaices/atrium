@@ -12,6 +12,8 @@ signal sessions(list)
 signal config_changed(cfg)
 ## The ⚙ panel: {"schema": [...], "overrides": {...}} — sent with every config.
 signal settings_changed(s)
+## A subscribe named a session the host does not have (closed since last run).
+signal session_missing(key)
 signal link_state(text)
 signal keys_ack(msg)
 signal scroll_ack(msg)
@@ -223,4 +225,9 @@ func _process(delta: float) -> void:
 			"scroll-ack":
 				emit_signal("scroll_ack", msg)
 			"error":
-				emit_signal("link_state", "server error: " + str(msg.get("error", "")))
+				var err := str(msg.get("error", ""))
+				if err.begins_with("no such tmux target"):
+					# Not a link problem: the terminal picks another session.
+					emit_signal("session_missing", str(msg.get("key", "")))
+				else:
+					emit_signal("link_state", "server error: " + err)

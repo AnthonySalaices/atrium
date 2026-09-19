@@ -69,9 +69,10 @@ def schema():
         {"group": "Keyboard", "rows": [
             _choice("kbd", "Keyboard view", "backdrop.passthrough.desk_window", _ON_OFF),
             _choice("kbd_size", "Size", "backdrop.passthrough.desk_window_size_m",
-                    [{"label": "small", "set": [0.8, 0.4]},
-                     {"label": "medium", "set": [1.2, 0.6]},
-                     {"label": "large", "set": [1.6, 0.8]}]),
+                    [{"label": "keyboard", "set": [0.45, 0.18]},
+                     {"label": "small", "set": [0.55, 0.24]},
+                     {"label": "medium", "set": [0.7, 0.3]},
+                     {"label": "large", "set": [0.95, 0.42]}]),
             _step("kbd_fwd", "Distance", "backdrop.passthrough.desk_window_forward_m",
                   0.2, 1.0, 0.05, " m"),
             _step("kbd_below", "Height", "backdrop.passthrough.desk_window_below_eye_m",

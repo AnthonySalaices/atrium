@@ -64,7 +64,7 @@ return {
       -- Toggle live: ctrl+alt+K, or Settings -> Keyboard. Placed relative to
       -- where you last recentred, never to the room.
       desk_window = false,
-      desk_window_size_m = { 1.2, 0.6 },   -- width, height
+      desk_window_size_m = { 0.55, 0.24 }, -- width, height (a full-size keyboard is ~0.45 x 0.15)
       desk_window_pitch_deg = -35,         -- 0 = upright, -90 = flat on the desk
       desk_window_forward_m = 0.45,        -- ahead of your eyes, 0.2..1.0
       desk_window_below_eye_m = 0.40,      -- below your eyes, 0.1..0.9
