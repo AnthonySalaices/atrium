@@ -185,18 +185,23 @@ def validate(cfg):
 
     pt = bd.setdefault("passthrough", {})
     pt["desk_window"] = bool(pt.get("desk_window", False))
+    # Size: width/height keys (the panel's), else the older desk_window_size_m pair.
     sz = pt.get("desk_window_size_m")
-    if not (isinstance(sz, list) and len(sz) == 2
-            and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in sz)):
-        sz = [0.55, 0.24]
-    pt["desk_window_size_m"] = [min(max(float(sz[0]), 0.2), 2.0), min(max(float(sz[1]), 0.1), 1.2)]
-    for key, lo, hi, dflt in (("desk_window_pitch_deg", -90.0, 0.0, -35.0),
+    if isinstance(sz, list) and len(sz) == 2 and all(
+            isinstance(x, (int, float)) and not isinstance(x, bool) for x in sz):
+        pt.setdefault("desk_window_width_m", sz[0])
+        pt.setdefault("desk_window_height_m", sz[1])
+    for key, lo, hi, dflt in (("desk_window_width_m", 0.2, 1.2, 0.38),
+                              ("desk_window_height_m", 0.1, 0.6, 0.16),
+                              ("desk_window_right_m", -0.5, 0.5, 0.0),
+                              ("desk_window_pitch_deg", -90.0, 0.0, -35.0),
                               ("desk_window_forward_m", 0.2, 1.0, 0.45),
                               ("desk_window_below_eye_m", 0.1, 0.9, 0.40)):
         v, changed = _clamp(pt.get(key), lo, hi, dflt)
         if changed:
             note("backdrop.passthrough.%s clamped to %g" % (key, v))
         pt[key] = v
+    pt["desk_window_size_m"] = [pt["desk_window_width_m"], pt["desk_window_height_m"]]
 
     custom = bd.setdefault("custom", {})
     v, changed = _clamp(custom.get("clear_radius_m"), 2.0, 10.0, 2.0)

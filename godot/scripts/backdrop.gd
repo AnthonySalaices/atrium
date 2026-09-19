@@ -575,19 +575,19 @@ func _update_passthrough() -> void:
 func _place_desk() -> void:
 	if desk_hole == null or not desk_hole.visible:
 		return
-	var sz = _desk.get("desk_window_size_m", [0.55, 0.24])
-	var size := Vector2(float(sz[0]), float(sz[1])) if sz is Array and sz.size() >= 2 \
-			else Vector2(0.55, 0.24)
+	var size := Vector2(float(_desk.get("desk_window_width_m", 0.38)),
+			float(_desk.get("desk_window_height_m", 0.16)))
+	var right := float(_desk.get("desk_window_right_m", 0.0))
 	var fwd := float(_desk.get("desk_window_forward_m", 0.45))
 	var below := float(_desk.get("desk_window_below_eye_m", 0.40))
 	var pitch := float(_desk.get("desk_window_pitch_deg", -35.0))
 	(desk_hole.mesh as QuadMesh).size = size
 	var mat := desk_hole.material_override as ShaderMaterial
 	mat.set_shader_parameter("size_m", size)
-	mat.set_shader_parameter("radius_m", minf(0.05, size.y * 0.2))
-	mat.set_shader_parameter("feather_m", minf(0.02, size.y * 0.08))
+	mat.set_shader_parameter("radius_m", minf(0.03, size.y * 0.2))
+	mat.set_shader_parameter("feather_m", minf(0.012, size.y * 0.08))
 	# A QuadMesh faces +Z (toward the seated user). Pitch 0 = upright like a
 	# screen, -90 = flat on the desk; the default leans back toward the eye.
 	var local := Transform3D(Basis(Vector3.RIGHT, deg_to_rad(pitch)),
-			Vector3(0.0, DESIGN_EYE_M - below, -fwd))
+			Vector3(right, DESIGN_EYE_M - below, -fwd))
 	desk_hole.transform = _anchor * local

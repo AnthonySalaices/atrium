@@ -56,7 +56,7 @@ func _init() -> void:
 	# Keyboard view: on in a room, off in passthrough, placed in ANCHOR space.
 	var b2 := Backdrop.new()
 	b2.apply({"mode": "default", "default": {"preset": "void"},
-			"passthrough": {"desk_window": true, "desk_window_size_m": [1.2, 0.6],
+			"passthrough": {"desk_window": true, "desk_window_width_m": 0.38, "desk_window_height_m": 0.16,
 				"desk_window_forward_m": 0.45, "desk_window_below_eye_m": 0.40,
 				"desk_window_pitch_deg": -35.0}})
 	check(b2.desk_window_on() and b2.desk_hole != null and b2.desk_hole.visible, "keyboard view on in a room")
