@@ -46,6 +46,8 @@ signal surface_tap(uv: Vector2)
 ## The controller Menu button (left controller; the right one's is the system
 ## button and never reaches an app). Opens / closes the ⚙ panel.
 signal menu_pressed
+## While `quiet` (the UI is hidden): any trigger / pinch, anywhere.
+signal wake
 
 const TAP_MAX_S := 0.6
 const DRAG_DIST_MIN := 0.6
@@ -62,6 +64,9 @@ var allow_select := true
 var allow_drag := true
 var allow_scroll := true
 var show_ray := true
+## UI hidden (terminal.gd toggle_ui): no rays, no dots, no targets — the next
+## press anywhere emits `wake` instead of doing anything else.
+var quiet := false
 var scroll_lines_per_s := 14.0
 var typing_lockout_ms := 1500
 ## Hands at all (ctrl+alt+H flips it; config pointer.hands). Controllers are
@@ -298,6 +303,13 @@ func _process(delta: float) -> void:
 func step(h: Dictionary, origin: Vector3, dir: Vector3, pressed: bool,
 		stick: Vector2, delta: float, is_hand: bool, grip: bool = false,
 		grip_on_text_drags: bool = true) -> Vector2i:
+	if quiet:
+		var was_q: bool = h["pressed"]
+		h["pressed"] = pressed
+		if pressed and not was_q:
+			emit_signal("wake")
+		_hide(h)
+		return Vector2i(-1, -1)
 	var hit := _nearest_hit(origin, dir)
 	h["hit"] = hit
 	# ⚠️ A closing HAND reports pinch and grasp together, in either order, so

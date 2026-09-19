@@ -126,7 +126,8 @@ func _ready() -> void:
 	pointers = Pointers.new()
 	origin.add_child(pointers)
 	pointers.card_selected.connect(_on_card_selected)
-	pointers.menu_pressed.connect(toggle_settings)
+	pointers.menu_pressed.connect(func(): toggle_ui() if _ui_hidden else toggle_settings())
+	pointers.wake.connect(func(): if _ui_hidden: toggle_ui())
 	pointers.overflow_selected.connect(func(): cycle_session(+1))
 	pointers.focus_moved.connect(_on_focus_dragged)
 	pointers.focus_resized.connect(_on_focus_resized)
@@ -493,6 +494,7 @@ func _build_buttons(k: float) -> void:
 	if is_web():
 		specs = [["__reload", "Reload", 0.0], ["__back", "Back", 0.0]]
 	specs.append(["__settings", "Settings", 1.0 if _settings_open else 0.0])
+	specs.append(["__hideui", "Hide", 0.0])
 	for i in range(specs.size()):
 		var b := GlassUI.button(rail_root, font, GlassUI.button_local(frame_outer, size * k, i),
 				size, specs[i][1], specs[i][2])
@@ -508,6 +510,8 @@ func _on_card_selected(key: String) -> void:
 	match key:
 		"__settings":
 			toggle_settings()
+		"__hideui":
+			toggle_ui()
 		"__new":
 			client.new_session()
 		"__back":
@@ -958,6 +962,11 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	# never arrives; ctrl+alt+R is the primary binding (and `keys.recenter`).
 	# ⚠️ A keyboard in Mac mode sends Option as Alt but many people reach for
 	# Command; accept either as the chord modifier.
+	# 🌄 UI hidden: any real key brings it back and is NOT typed.
+	if _ui_hidden:
+		if not k.echo and not (k.keycode in [KEY_CTRL, KEY_ALT, KEY_SHIFT, KEY_META]):
+			toggle_ui()
+		return
 	if not k.echo and k.ctrl_pressed and (k.alt_pressed or k.meta_pressed):
 		# ⚠️ These are matched before the router runs, so a binding never also
 		# gets typed into the pane. They mirror `keys` in config/default.lua;
@@ -982,6 +991,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
 				return
 			KEY_S:
 				toggle_settings()
+				return
+			KEY_U:
+				toggle_ui()
 				return
 			KEY_K:
 				# Keyboard view: a passthrough window at the desk. Saved like a
@@ -1193,6 +1205,31 @@ var _settings_over: Dictionary = {}
 var _settings_tab := 0
 var _scene_pick := ""               # the previewed scene key, "" = none picked yet
 var settings_root: Node3D
+
+
+# ── 🌄 hide the UI ────────────────────────────────────────────────────────────
+#
+# Owner 9/18: "a clean way to minimize and bring back up the ui so i can soak
+# in the scenery". Hide = the Hide button or ctrl+alt+U; everything goes:
+# window, text layer, rail, buttons, settings, rays and the keyboard view.
+# Back = ANY trigger/pinch anywhere, the Menu button, any key, ctrl+alt+U.
+
+var _ui_hidden := false
+
+
+func toggle_ui() -> void:
+	if not _ui_hidden and _settings_open:
+		toggle_settings()
+	_ui_hidden = not _ui_hidden
+	if focus_group:
+		focus_group.visible = not _ui_hidden
+	if layer and "enabled" in layer:
+		layer.enabled = not _ui_hidden
+	if pointers:
+		pointers.quiet = _ui_hidden
+	if backdrop:
+		backdrop.set_desk_hidden(_ui_hidden)
+	print("[term] ui %s" % ("hidden" if _ui_hidden else "shown"))
 
 
 func toggle_settings() -> void:

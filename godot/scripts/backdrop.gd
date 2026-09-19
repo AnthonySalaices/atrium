@@ -533,8 +533,17 @@ func _collect_players(n: Node, out: Array) -> void:
 # viewport, so clear pixels have alpha 0. Only while needed — passthrough costs
 # GPU and battery, and a room needs neither.
 
+var _desk_hidden := false
+
+
 func desk_window_on() -> bool:
-	return mode != "passthrough" and bool(_desk.get("desk_window", false))
+	return mode != "passthrough" and bool(_desk.get("desk_window", false)) and not _desk_hidden
+
+
+## The UI is hidden to look at the scene: the keyboard view goes too.
+func set_desk_hidden(on: bool) -> void:
+	_desk_hidden = on
+	_update_passthrough()
 
 
 func _update_passthrough() -> void:
@@ -548,8 +557,12 @@ func _update_passthrough() -> void:
 				xri.environment_blend_mode = bm
 			else:
 				print("[backdrop] blend mode %d not supported by this runtime" % bm)
+	# ⚠️ Only FULL passthrough clears to transparent. With the keyboard view on,
+	# a transparent clear let the real room show through everywhere the scene
+	# draws no geometry — void and the night sky (owner 9/18). The hole writes
+	# alpha 0 itself (blend_mul), so an opaque clear is enough for it.
 	if is_inside_tree():
-		get_viewport().transparent_bg = want_alpha
+		get_viewport().transparent_bg = mode == "passthrough"
 	if desk_window_on():
 		if desk_hole == null:
 			desk_hole = MeshInstance3D.new()
