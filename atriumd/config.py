@@ -183,6 +183,21 @@ def validate(cfg):
             note("backdrop.custom.glb not found: %s — using 'default'" % glb)
             bd["mode"] = "default"
 
+    pt = bd.setdefault("passthrough", {})
+    pt["desk_window"] = bool(pt.get("desk_window", False))
+    sz = pt.get("desk_window_size_m")
+    if not (isinstance(sz, list) and len(sz) == 2
+            and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in sz)):
+        sz = [1.2, 0.6]
+    pt["desk_window_size_m"] = [min(max(float(sz[0]), 0.3), 2.0), min(max(float(sz[1]), 0.2), 1.2)]
+    for key, lo, hi, dflt in (("desk_window_pitch_deg", -90.0, 0.0, -35.0),
+                              ("desk_window_forward_m", 0.2, 1.0, 0.45),
+                              ("desk_window_below_eye_m", 0.1, 0.9, 0.40)):
+        v, changed = _clamp(pt.get(key), lo, hi, dflt)
+        if changed:
+            note("backdrop.passthrough.%s clamped to %g" % (key, v))
+        pt[key] = v
+
     custom = bd.setdefault("custom", {})
     v, changed = _clamp(custom.get("clear_radius_m"), 2.0, 10.0, 2.0)
     if changed:
@@ -207,8 +222,8 @@ def validate(cfg):
     if hz not in REFRESH_RATES:
         note("comfort.refresh_hz %r unsupported — using 72 (valid: %s)"
              % (hz, ", ".join(str(r) for r in REFRESH_RATES)))
-        comfort["refresh_hz"] = 72
-    v, changed = _clamp(comfort.get("foveation"), 0, 4, 2)
+        comfort["refresh_hz"] = 120
+    v, changed = _clamp(comfort.get("foveation"), 0, 4, 0)
     if changed:
         note("comfort.foveation clamped to %d" % int(v))
     comfort["foveation"] = int(v)

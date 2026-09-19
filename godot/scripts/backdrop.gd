@@ -66,6 +66,9 @@ var _src_token := ""
 var _http: HTTPRequest
 var _fetching := false
 var _custom: Node3D                # built, waiting to be installed
+# ⌨ Keyboard view: a passthrough window at the desk (backdrop.passthrough.desk_*).
+var desk_hole: MeshInstance3D
+var _desk := {}
 var _want_custom := false          # the config asked for a custom room
 
 
@@ -131,6 +134,7 @@ func anchor(t: Transform3D) -> void:
 			Vector3(t.origin.x, dy, t.origin.z))
 	if room:
 		room.transform = _anchor * _seat_inv
+	_place_desk()
 	print("[backdrop] anchored: eye %.2f m, room shifted %.2f m" % [t.origin.y, dy])
 
 
@@ -156,6 +160,7 @@ func apply(bd: Dictionary) -> void:
 
 	# ⚠️ WorldEnvironment is a plain Node, not a VisualInstance3D — it has no
 	# `visible`. Switch the background mode instead.
+	_desk = bd.get("passthrough", {})
 	if mode == "passthrough":
 		env.background_mode = Environment.BG_CLEAR_COLOR
 		env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
@@ -202,6 +207,7 @@ func apply(bd: Dictionary) -> void:
 	var room_dim := dim > 0.001 and room != null and room.visible
 	env.adjustment_enabled = room_dim
 	env.adjustment_brightness = 1.0 - 0.6 * dim if room_dim else 1.0
+	_update_passthrough()
 	print("[backdrop] mode=%s preset=%s dim=%.2f%s"
 			% [mode, preset, dim, "  (custom)" if _room_kind == "custom" else ""])
 
@@ -516,3 +522,71 @@ func _collect_players(n: Node, out: Array) -> void:
 		out.append(n)
 	for c in n.get_children():
 		_collect_players(c, out)
+
+
+# ── passthrough ────────────────────────────────────────────────────────────
+#
+# ⚠️ Until 9/18 `mode = "passthrough"` only switched the background to a clear
+# colour: nothing ever asked the runtime for passthrough, so the headset showed
+# a flat colour. It takes BOTH: the OpenXR environment blend mode ALPHA_BLEND
+# (the vendors plugin starts Meta passthrough on it) and a transparent main
+# viewport, so clear pixels have alpha 0. Only while needed — passthrough costs
+# GPU and battery, and a room needs neither.
+
+func desk_window_on() -> bool:
+	return mode != "passthrough" and bool(_desk.get("desk_window", false))
+
+
+func _update_passthrough() -> void:
+	var want_alpha := mode == "passthrough" or desk_window_on()
+	var xri := XRServer.find_interface("OpenXR")
+	if xri != null and xri.is_initialized():
+		var bm := XRInterface.XR_ENV_BLEND_MODE_ALPHA_BLEND if want_alpha \
+				else XRInterface.XR_ENV_BLEND_MODE_OPAQUE
+		if xri.environment_blend_mode != bm:
+			if bm in xri.get_supported_environment_blend_modes():
+				xri.environment_blend_mode = bm
+			else:
+				print("[backdrop] blend mode %d not supported by this runtime" % bm)
+	if is_inside_tree():
+		get_viewport().transparent_bg = want_alpha
+	if desk_window_on():
+		if desk_hole == null:
+			desk_hole = MeshInstance3D.new()
+			desk_hole.name = "KeyboardView"
+			desk_hole.mesh = QuadMesh.new()
+			var m := ShaderMaterial.new()
+			m.shader = load("res://shaders/passthrough_hole.gdshader")
+			# Before every other transparent thing: the glass frame and cards
+			# draw over the hole instead of being punched out by it.
+			m.render_priority = -100
+			desk_hole.material_override = m
+			desk_hole.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			add_child(desk_hole)
+		desk_hole.visible = true
+		_place_desk()
+	elif desk_hole != null:
+		desk_hole.visible = false
+
+
+## Size and place the keyboard view in ANCHOR space — the recentred head, not
+## the room: a seat offset must never move your real keyboard. It sits
+## `forward` ahead and `below` under the eye, tilted to face you.
+func _place_desk() -> void:
+	if desk_hole == null or not desk_hole.visible:
+		return
+	var sz = _desk.get("desk_window_size_m", [1.2, 0.6])
+	var size := Vector2(float(sz[0]), float(sz[1])) if sz is Array and sz.size() >= 2 \
+			else Vector2(1.2, 0.6)
+	var fwd := float(_desk.get("desk_window_forward_m", 0.45))
+	var below := float(_desk.get("desk_window_below_eye_m", 0.40))
+	var pitch := float(_desk.get("desk_window_pitch_deg", -35.0))
+	(desk_hole.mesh as QuadMesh).size = size
+	var mat := desk_hole.material_override as ShaderMaterial
+	mat.set_shader_parameter("size_m", size)
+	mat.set_shader_parameter("radius_m", minf(0.08, size.y * 0.2))
+	# A QuadMesh faces +Z (toward the seated user). Pitch 0 = upright like a
+	# screen, -90 = flat on the desk; the default leans back toward the eye.
+	var local := Transform3D(Basis(Vector3.RIGHT, deg_to_rad(pitch)),
+			Vector3(0.0, DESIGN_EYE_M - below, -fwd))
+	desk_hole.transform = _anchor * local

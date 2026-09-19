@@ -70,5 +70,37 @@ class SettingsTest(unittest.TestCase):
         self.assertIn("", presets)       # passthrough needs no GLB
 
 
+class SchemaTest(unittest.TestCase):
+    def test_every_row_path_survives_validation(self):
+        """Each panel value, once applied, must come out of validate() as set —
+        a row whose value the validator rewrites would look broken."""
+        tmp = tempfile.mkdtemp()
+        lua = os.path.join(tmp, "config.lua")
+        open(lua, "w").write("return {}\n")
+        sp = settings.path_for(lua)
+        for g in settings.schema():
+            for r in g["rows"]:
+                if r["kind"] == "step":
+                    vals = [{r["path"]: r["min"]}, {r["path"]: r["max"]}]
+                else:
+                    vals = [o["set"] for o in r["options"]]
+                for v in vals:
+                    settings.reset(sp)
+                    settings.update(sp, v)
+                    w = config.ConfigWatcher(lua)
+                    for path, want in v.items():
+                        node = w.config
+                        for k in path.split("."):
+                            node = node[k]
+                        self.assertEqual(node, want, "%s: set %r, validated %r" % (path, want, node))
+
+    def test_integer_steps_stay_integers(self):
+        tmp = tempfile.mkdtemp()
+        sp = os.path.join(tmp, "settings.json")
+        d = settings.update(sp, {"panels.focus.cols": 91.7, "browser.fps": 12.2})
+        self.assertEqual(d["panels.focus.cols"], 92)
+        self.assertIsInstance(d["browser.fps"], int)
+
+
 if __name__ == "__main__":
     unittest.main()

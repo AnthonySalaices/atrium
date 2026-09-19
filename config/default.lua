@@ -58,12 +58,16 @@ return {
     },
 
     passthrough = {
-      -- A real passthrough window cut into an otherwise opaque room, so you can
-      -- see the desk and keyboard without leaving the room. Ignored when
-      -- mode == "passthrough" (then everything is already passthrough).
-      desk_window = true,
-      desk_window_size_m = { 1.2, 0.6 },
-      desk_window_pitch_deg = -35,
+      -- ⌨ KEYBOARD VIEW: a real passthrough window cut into the room at your
+      -- desk, so you can see the keyboard and your hands without leaving the
+      -- room. Ignored when mode == "passthrough" (everything is already real).
+      -- Toggle live: ctrl+alt+K, or Settings -> Keyboard. Placed relative to
+      -- where you last recentred, never to the room.
+      desk_window = false,
+      desk_window_size_m = { 1.2, 0.6 },   -- width, height
+      desk_window_pitch_deg = -35,         -- 0 = upright, -90 = flat on the desk
+      desk_window_forward_m = 0.45,        -- ahead of your eyes, 0.2..1.0
+      desk_window_below_eye_m = 0.40,      -- below your eyes, 0.1..0.9
     },
   },
 
@@ -375,11 +379,12 @@ return {
   -- COMFORT / PERFORMANCE
   ----------------------------------------------------------------------------
   comfort = {
-    refresh_hz = 72,            -- 72 | 90 | 120. Higher costs battery and heat.
+    refresh_hz = 120,           -- 72 | 90 | 120. Higher costs battery and heat; 120 = smoothest text.
     hand_tracking = true,
     typing_lockout_ms = 1500,   -- ignore pinches while you are typing, so resting
                                 -- hands on the keyboard never grab a panel
-    foveation = 2,              -- 0..4, fixed foveated rendering
+    foveation = 0,              -- 0..4, fixed foveated rendering. 0 = sharp edges (text lives
+                                -- everywhere on a terminal); higher saves GPU in heavy rooms.
   },
 }
 

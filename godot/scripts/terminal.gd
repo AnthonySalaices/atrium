@@ -305,6 +305,22 @@ func _apply_backdrop_config(cfg: Dictionary) -> void:
 	pulse_enabled = str(ni.get("pulse", "breathe")) != "none"
 
 
+## Refresh rate (the nearest the runtime offers, never above the ask) and fixed
+## foveation. ⚠️ Foveation blurs off-centre text, and a terminal is nothing but
+## fine detail — hence default 0; heavy rooms may want 1-2 for frame time.
+func _apply_comfort(hz: int, fov: int) -> void:
+	if xr_interface == null or not xr_interface.is_initialized():
+		return
+	var best := 0.0
+	for r in xr_interface.get_available_display_refresh_rates():
+		if float(r) <= float(hz) + 0.5 and float(r) > best:
+			best = float(r)
+	if best > 0.0 and not is_equal_approx(xr_interface.get_display_refresh_rate(), best):
+		xr_interface.set_display_refresh_rate(best)
+		print("[term] refresh %d Hz" % int(best))
+	xr_interface.set_foveation_level(clampi(fov, 0, 4))
+
+
 func _read_token() -> String:
 	# Shipped alongside the APK for now; a real build asks once and stores it.
 	return _read_data_file("token.txt", "")
@@ -329,13 +345,7 @@ func _boot_xr() -> void:
 		DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
 		if RenderingServer.get_rendering_device():
 			vp.vrs_mode = Viewport.VRS_XR
-		var rates: Array = xr_interface.get_available_display_refresh_rates()
-		if rates.has(120.0):
-			xr_interface.set_display_refresh_rate(120.0)
-		elif rates.has(90.0):
-			xr_interface.set_display_refresh_rate(90.0)
-		# Foveation blurs off-centre text; a terminal is nothing but fine detail.
-		xr_interface.set_foveation_level(0)
+		_apply_comfort(120, 0)
 		# Re-donning the headset: automatic, so it goes through the guard.
 		xr_interface.session_focussed.connect(
 			func(): get_tree().create_timer(0.5).timeout.connect(_auto_recenter))
@@ -563,6 +573,8 @@ func _apply_config(cfg: Dictionary) -> void:
 	if _apply_colors() and frame_mesh:
 		frame_mesh.material_override.set_shader_parameter("body_color", GlassUI.body)
 		_rebuild_rail()
+	var cf: Dictionary = cfg.get("comfort", {})
+	_apply_comfort(int(cf.get("refresh_hz", 120)), int(cf.get("foveation", 0)))
 	_pointer_cfg = cfg.get("pointer", {})
 	if pointers:
 		pointers.set_config(_pointer_cfg,
@@ -912,6 +924,19 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			KEY_S:
 				toggle_settings()
 				return
+			KEY_K:
+				# Keyboard view: a passthrough window at the desk. Saved like a
+				# panel change, so it survives a restart.
+				var on := backdrop != null and backdrop.desk_window_on()
+				client.send_settings({"backdrop.passthrough.desk_window": not on})
+				_flash("keyboard view off" if on else "keyboard view on")
+				return
+			KEY_B:
+				# Room <-> your real room (keys.toggle_backdrop).
+				var real := str(_cfg_get("backdrop.mode")) == "passthrough"
+				client.send_settings({"backdrop.mode": "default" if real else "passthrough"})
+				_flash("room" if real else "passthrough")
+				return
 			KEY_H:
 				if pointers:
 					_flash("hands on" if pointers.toggle_hands() else "hands off")
@@ -1093,7 +1118,8 @@ func _resize_panel(new_dmm: float) -> void:
 
 const SET_ROW_W_DEG := 20.0
 const SET_SMALL_W_DEG := 3.2
-const SET_TAB_W_DEG := 7.6
+const SET_TAB_W_DEG := 6.9
+const SET_TABS_PER_ROW := 4
 const SET_GAP_M := 0.012
 
 var _settings_open := false
@@ -1135,8 +1161,11 @@ func _build_settings(k: float) -> void:
 	if _settings_schema.is_empty():
 		_settings_button("done", "Settings: waiting for the host…", SET_ROW_W_DEG, x, y, 0.0, k)
 		return
-	# Tabs: one per group, the open one lit.
+	# Tabs: one per group, the open one lit, SET_TABS_PER_ROW to a row.
 	for i in range(_settings_schema.size()):
+		if i > 0 and i % SET_TABS_PER_ROW == 0:
+			x = 0.0
+			y += h + SET_GAP_M
 		var g: Dictionary = _settings_schema[i]
 		x = _settings_button("tab:%d" % i, str(g.get("group", "?")).split(" ")[0],
 				SET_TAB_W_DEG, x, y, 1.0 if i == _settings_tab else 0.0, k)
@@ -1222,7 +1251,10 @@ func _settings_value_text(r: Dictionary) -> String:
 		var unit := str(r.get("unit", ""))
 		if unit == "%":
 			return "%d%%" % roundi(float(v) * 100.0)
-		return "%s%s" % [str(snappedf(float(v), 0.1)).trim_suffix(".0"), unit]
+		# As many decimals as the step has: 0.45 m, 1.5 m, 120 cols.
+		var st := float(r.get("step", 1.0))
+		var digits := 0 if st >= 1.0 else (1 if st >= 0.1 else 2)
+		return ("%." + str(digits) + "f%s") % [float(v), unit]
 	var opts := _settings_options(r)
 	var i := _settings_current(opts)
 	return str(opts[i].get("label", "?")) if i >= 0 else "custom"

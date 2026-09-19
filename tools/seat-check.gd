@@ -53,5 +53,18 @@ func _init() -> void:
 	bd._fix_materials(tex_mi)
 	check(not (am.surface_get_material(0) as BaseMaterial3D).vertex_color_use_as_albedo,
 			"no COLOR_0 -> vertex colour off (texture shows)")
+	# Keyboard view: on in a room, off in passthrough, placed in ANCHOR space.
+	var b2 := Backdrop.new()
+	b2.apply({"mode": "default", "default": {"preset": "void"},
+			"passthrough": {"desk_window": true, "desk_window_size_m": [1.2, 0.6],
+				"desk_window_forward_m": 0.45, "desk_window_below_eye_m": 0.40,
+				"desk_window_pitch_deg": -35.0}})
+	check(b2.desk_window_on() and b2.desk_hole != null and b2.desk_hole.visible, "keyboard view on in a room")
+	b2.anchor(Transform3D(Basis.IDENTITY, Vector3(0.3, 1.10, -0.2)))
+	var hp := b2.desk_hole.global_transform.origin if b2.desk_hole.is_inside_tree() else b2.desk_hole.transform.origin
+	check(hp.is_equal_approx(Vector3(0.3, 1.10 - 0.40, -0.2 - 0.45)),
+			"keyboard view 0.40 m below the eye, 0.45 m ahead: %s" % hp)
+	b2.apply({"mode": "passthrough", "passthrough": {"desk_window": true}})
+	check(not b2.desk_window_on() and not b2.desk_hole.visible, "no keyboard view in full passthrough")
 	print("all green" if fails == 0 else "%d FAILED" % fails)
 	quit(1 if fails else 0)

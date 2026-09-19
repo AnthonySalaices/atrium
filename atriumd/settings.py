@@ -53,8 +53,11 @@ def _step(key, label, path, lo, hi, step, unit=""):
 
 
 def schema():
-    """The rows of the ⚙ panel, grouped. Built per call so new colour schemes
-    show up without a daemon restart."""
+    """The rows of the ⚙ panel, grouped (one tab each). Built per call so new
+    colour schemes show up without a daemon restart.
+
+    ⛔ Only keys something actually READS. A switch that does nothing is worse
+    than no switch — check the client/daemon before adding a row."""
     return [
         {"group": "Scene", "rows": [
             {"id": "scene", "label": "Scene", "kind": "choice",
@@ -63,6 +66,19 @@ def schema():
                          for lbl, s in SCENES]},
             _step("dim", "Dim", "backdrop.default.dim", 0.0, 0.8, 0.1, "%"),
         ]},
+        {"group": "Keyboard", "rows": [
+            _choice("kbd", "Keyboard view", "backdrop.passthrough.desk_window", _ON_OFF),
+            _choice("kbd_size", "Size", "backdrop.passthrough.desk_window_size_m",
+                    [{"label": "small", "set": [0.8, 0.4]},
+                     {"label": "medium", "set": [1.2, 0.6]},
+                     {"label": "large", "set": [1.6, 0.8]}]),
+            _step("kbd_fwd", "Distance", "backdrop.passthrough.desk_window_forward_m",
+                  0.2, 1.0, 0.05, " m"),
+            _step("kbd_below", "Height", "backdrop.passthrough.desk_window_below_eye_m",
+                  0.1, 0.9, 0.05, " m below eyes"),
+            _step("kbd_pitch", "Tilt", "backdrop.passthrough.desk_window_pitch_deg",
+                  -90.0, 0.0, 5.0, "°"),
+        ]},
         {"group": "Look", "rows": [
             _choice("scheme", "Colours", "color_scheme",
                     [{"label": n, "set": n} for n in schemes.SCHEMES]),
@@ -70,18 +86,48 @@ def schema():
                     [{"label": "JetBrains Mono", "set": "JetBrainsMono Nerd Font"},
                      {"label": "Iosevka Term", "set": "Iosevka Term Medium"}]),
             _step("text", "Text size", "font.size_dmm", 18.0, 40.0, 1.0, " dmm"),
+            _step("lh", "Line spacing", "font.line_height", 1.0, 2.0, 0.05, "×"),
+            _choice("cursor", "Cursor", "default_cursor_style",
+                    [{"label": lbl, "set": v} for lbl, v in (
+                        ("block", "SteadyBlock"), ("block, blinking", "BlinkingBlock"),
+                        ("bar", "SteadyBar"), ("bar, blinking", "BlinkingBar"),
+                        ("underline", "SteadyUnderline"),
+                        ("underline, blinking", "BlinkingUnderline"))]),
+            _choice("pulse", "Attention pulse", "glow.states.needs_input.pulse",
+                    [{"label": "breathe", "set": "breathe"}, {"label": "steady", "set": "none"}]),
         ]},
-        {"group": "Controls", "rows": [
+        {"group": "Window", "rows": [
+            _step("dist", "Distance", "panels.focus.distance_m", 1.2, 2.5, 0.1, " m"),
+            _step("pitch", "Tilt", "panels.focus.pitch_deg", -30.0, 10.0, 2.0, "°"),
+            _step("cols", "Columns", "panels.focus.cols", 60, 200, 10, ""),
+            _step("rows", "Rows", "panels.focus.rows", 16, 60, 2, ""),
+            _choice("pin", "Pane size", "sessions.pin_mode",
+                    [{"label": "follow", "set": "follow"}, {"label": "resize", "set": "resize"}]),
+        ]},
+        {"group": "Input", "rows": [
             _choice("hands", "Hand tracking", "pointer.hands", _ON_OFF),
             _choice("hand", "Pointing hand", "pointer.hand",
                     [{"label": v, "set": v} for v in ("right", "left", "both")]),
             _choice("ray", "Show ray", "pointer.show_ray", _ON_OFF),
+            _choice("drag", "Grab windows", "pointer.drag", _ON_OFF),
+            _step("scroll", "Scroll speed", "pointer.scroll_lines_per_s", 2, 60, 2, " lines/s"),
+            _step("lock", "Typing lockout", "comfort.typing_lockout_ms", 0, 5000, 250, " ms"),
         ]},
-        {"group": "Sound & sessions", "rows": [
+        {"group": "Sound", "rows": [
             _choice("ambience", "Room sound", "ambience.enabled", _ON_OFF),
             _step("volume", "Volume", "ambience.volume", 0.0, 1.0, 0.05, "%"),
-            _choice("pin", "Window size", "sessions.pin_mode",
-                    [{"label": "follow", "set": "follow"}, {"label": "resize", "set": "resize"}]),
+            _choice("clicks", "Typing clicks", "ambience.typing.enabled", _ON_OFF),
+            _choice("steam", "Steam wand", "ambience.steam.enabled", _ON_OFF),
+            _choice("music", "Music", "ambience.music.mode",
+                    [{"label": "pad", "set": "procedural"}, {"label": "off", "set": "off"}]),
+            _step("mvol", "Music volume", "ambience.music.volume", 0.0, 1.0, 0.05, "%"),
+        ]},
+        {"group": "More", "rows": [
+            _choice("hz", "Refresh rate", "comfort.refresh_hz",
+                    [{"label": "%d Hz" % v, "set": v} for v in (72, 90, 120)]),
+            _step("fov", "Foveation", "comfort.foveation", 0, 4, 1, ""),
+            _step("wfps", "Web fps", "browser.fps", 5, 30, 5, ""),
+            _step("wq", "Web quality", "browser.quality", 30, 95, 5, ""),
         ]},
     ]
 
@@ -92,7 +138,8 @@ def _allowed(sch):
     for g in sch:
         for r in g["rows"]:
             if r["kind"] == "step":
-                out[r["path"]] = ("step", r["min"], r["max"])
+                ints = all(isinstance(r[k], int) for k in ("min", "max", "step"))
+                out[r["path"]] = ("step", r["min"], r["max"], ints)
             else:
                 for o in r["options"]:
                     for p, v in o["set"].items():
@@ -136,6 +183,8 @@ def check(values, sch=None):
             if isinstance(v, bool) or not isinstance(v, (int, float)):
                 raise ValueError("%s wants a number" % p)
             v = round(min(max(float(v), rule[1]), rule[2]), 4)
+            if rule[3]:
+                v = int(round(v))      # columns, rows, ms, fps: never 90.0
         elif v not in rule[1]:
             raise ValueError("%s cannot be %r" % (p, v))
         out[p] = v
