@@ -55,7 +55,7 @@ func _init() -> void:
 			"no COLOR_0 -> vertex colour off (texture shows)")
 	# Keyboard view: on in a room, off in passthrough, placed in ANCHOR space.
 	var b2 := Backdrop.new()
-	b2.apply({"mode": "default", "default": {"preset": "void"},
+	b2.apply({"mode": "default", "default": {"preset": "cafe"},
 			"passthrough": {"desk_window": true, "desk_window_width_m": 0.38, "desk_window_height_m": 0.16,
 				"desk_window_forward_m": 0.45, "desk_window_below_eye_m": 0.40,
 				"desk_window_pitch_deg": -35.0}})
@@ -64,12 +64,10 @@ func _init() -> void:
 	var hp := b2.desk_hole.global_transform.origin if b2.desk_hole.is_inside_tree() else b2.desk_hole.transform.origin
 	check(hp.is_equal_approx(Vector3(0.3, 1.10 - 0.40, -0.2 - 0.45)),
 			"keyboard view 0.40 m below the eye, 0.45 m ahead: %s" % hp)
-	check(b2.dome != null and b2.dome.visible and b2.dome.material_override is StandardMaterial3D,
-			"void + keyboard view -> an opaque dome")
+	b2.apply({"mode": "default", "default": {"preset": "void"}, "passthrough": {"desk_window": true}})
+	check(not b2.desk_window_on() and not b2.desk_hole.visible, "void: keyboard view stays off (no geometry)")
 	b2.apply({"mode": "default", "default": {"preset": "nebula"}, "passthrough": {"desk_window": true}})
-	check(b2.dome.visible and b2.dome.material_override is ShaderMaterial, "night sky + keyboard view -> the night dome")
-	b2.apply({"mode": "default", "default": {"preset": "nebula"}, "passthrough": {"desk_window": false}})
-	check(not b2.dome.visible, "no keyboard view -> no dome (the sky is enough)")
+	check(not b2.desk_window_on(), "night sky: keyboard view stays off")
 	b2.apply({"mode": "passthrough", "passthrough": {"desk_window": true}})
 	check(not b2.desk_window_on() and not b2.desk_hole.visible, "no keyboard view in full passthrough")
 	print("all green" if fails == 0 else "%d FAILED" % fails)

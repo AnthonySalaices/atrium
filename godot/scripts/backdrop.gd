@@ -534,15 +534,16 @@ func _collect_players(n: Node, out: Array) -> void:
 # GPU and battery, and a room needs neither.
 
 var _desk_hidden := false
-# Void / night sky as geometry, only while the keyboard view is on (see
-# _update_dome). Everything the scene leaves empty turns see-through then.
-var dome: MeshInstance3D
-var _dome_night: ShaderMaterial
-var _dome_void: StandardMaterial3D
 
 
+## ⚠️ Rooms only. The keyboard view alpha-blends the whole frame with the
+## cameras, and void / the night sky draw no geometry, so they turned see-
+## through (9/18). A head-following sphere behind them made the UI vanish in the
+## night sky (cause unproven, 9/18 late) and was reverted — so in those two the
+## keyboard view simply stays off. Revisit with the headset + log together.
 func desk_window_on() -> bool:
-	return mode != "passthrough" and bool(_desk.get("desk_window", false)) and not _desk_hidden
+	return mode != "passthrough" and bool(_desk.get("desk_window", false)) and not _desk_hidden \
+			and room != null and room.visible
 
 
 ## The UI is hidden to look at the scene: the keyboard view goes too.
@@ -568,7 +569,6 @@ func _update_passthrough() -> void:
 	# alpha 0 itself (blend_mul), so an opaque clear is enough for it.
 	if is_inside_tree():
 		get_viewport().transparent_bg = mode == "passthrough"
-	_update_dome()
 	if desk_window_on():
 		if desk_hole == null:
 			desk_hole = MeshInstance3D.new()
@@ -586,49 +586,6 @@ func _update_passthrough() -> void:
 		_place_desk()
 	elif desk_hole != null:
 		desk_hole.visible = false
-
-
-## ⚠️ With the keyboard view on, the frame is alpha-blended with the cameras,
-## and a pixel the scene leaves empty is see-through: void and the night sky
-## became passthrough (owner 9/18; an opaque clear did not stop it). Rooms are
-## solid geometry and never leaked. So void and sky get a real sphere then.
-func _update_dome() -> void:
-	var want := desk_window_on() and mode == "default" and preset in ["void", "nebula"] \
-			and not (room != null and room.visible)
-	if not want:
-		if dome != null:
-			dome.visible = false
-		return
-	if dome == null:
-		dome = MeshInstance3D.new()
-		dome.name = "Dome"
-		var sm := SphereMesh.new()
-		sm.radius = 300.0
-		sm.height = 600.0
-		sm.radial_segments = 48
-		sm.rings = 24
-		dome.mesh = sm
-		dome.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		_dome_night = ShaderMaterial.new()
-		_dome_night.shader = load("res://shaders/nebula_dome.gdshader")
-		_dome_void = StandardMaterial3D.new()
-		_dome_void.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		_dome_void.cull_mode = BaseMaterial3D.CULL_FRONT
-		_dome_void.albedo_color = VOID_COLOR
-		add_child(dome)
-	dome.material_override = _dome_void if preset == "void" else _dome_night
-	if sky_mat:
-		for k in ["nebula_strength", "star_brightness"]:
-			_dome_night.set_shader_parameter(k, sky_mat.get_shader_parameter(k))
-	dome.visible = true
-
-
-func _process(_delta: float) -> void:
-	# The dome is "at infinity": it rides with the head, so it never parallaxes.
-	if dome != null and dome.visible:
-		var cam := get_viewport().get_camera_3d()
-		if cam:
-			dome.global_position = cam.global_position
 
 
 ## Size and place the keyboard view in ANCHOR space — the recentred head, not
