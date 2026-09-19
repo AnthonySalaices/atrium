@@ -27,6 +27,9 @@ const ROOMS := {
 	"cafe-night": {"scene": "res://backdrops/cafe-night.glb", "clear": Color(0.07, 0.08, 0.16)},
 	"cabin": {"scene": "res://backdrops/cabin.glb", "clear": Color(0.20, 0.12, 0.22)},
 	"library": {"scene": "res://backdrops/library.glb", "clear": Color(0.10, 0.09, 0.08)},
+	"golden-gate": {"scene": "res://backdrops/golden-gate.glb", "clear": Color(0.93, 0.88, 0.84)},
+	"twin-peaks": {"scene": "res://backdrops/twin-peaks.glb", "clear": Color(0.04, 0.05, 0.12)},
+	"painted-ladies": {"scene": "res://backdrops/painted-ladies.glb", "clear": Color(0.55, 0.75, 0.95)},
 	# ⭐ One GLB, two places to sit (AS-0008). `seat` names an Empty in the GLB
 	# whose position is 1.20 m below the design eye, facing the view: the room is
 	# offset so that Empty lands where every other room's origin does.
