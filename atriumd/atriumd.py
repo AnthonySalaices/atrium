@@ -81,6 +81,7 @@ def authed(path, hdrs):
     return auth == "Bearer " + TOKEN
 import config as _config
 import files as _files
+import settings as _settings
 
 _cfgwatch = None
 
@@ -851,6 +852,24 @@ def ws_reader(c):
                         c.send({"type": "session-closed", "key": key})
                     except Exception as e:
                         c.send({"type": "error", "key": key, "error": "close failed: %s" % e})
+                elif msg.get("op") in ("set_settings", "reset_settings"):
+                    # The ⚙ panel. Only paths the panel schema lists, only the
+                    # values it lists; config.lua itself is never written.
+                    w = cfgwatch()
+                    sp = _settings.path_for(w.user_path)
+                    try:
+                        if msg["op"] == "set_settings":
+                            _settings.update(sp, dict(msg.get("values") or {}))
+                        else:
+                            keys = msg.get("keys")
+                            _settings.reset(sp, None if keys is None else [str(k) for k in keys])
+                    except (ValueError, TypeError, OSError) as e:
+                        c.send({"type": "error", "error": "settings: %s" % e})
+                        continue
+                    print("[settings] %s %s" % (msg["op"], msg.get("values") or msg.get("keys")), flush=True)
+                    if w.poll():
+                        _broadcast(w.frame())
+                        browser_sync(w.config)
                 elif msg.get("op") == "ping":
                     for k in c.subs:
                         if _browsermod.is_web(k):

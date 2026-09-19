@@ -43,6 +43,9 @@ signal grid_hover(col: int, row: int)
 ## `uv` is 0..1 across the layer, (0,0) top-left. Terminals ignore it; a web
 ## page turns it into a click.
 signal surface_tap(uv: Vector2)
+## The controller Menu button (left controller; the right one's is the system
+## button and never reaches an app). Opens / closes the ⚙ panel.
+signal menu_pressed
 
 const TAP_MAX_S := 0.6
 const DRAG_DIST_MIN := 0.6
@@ -238,6 +241,13 @@ func _is_target(m) -> bool:
 func _process(delta: float) -> void:
 	if not enabled:
 		return
+	# Before the pointing-hand filter: Menu lives on the keyboard hand's controller.
+	for h in _hands:
+		var mc: XRController3D = h["ctrl"]
+		var down := mc.get_is_active() and mc.is_button_pressed("menu_button")
+		if down and not h.get("menu", false):
+			emit_signal("menu_pressed")
+		h["menu"] = down
 	var hover := Vector2i(-1, -1)
 	for h in _hands:
 		var c: XRController3D = h["ctrl"]

@@ -126,6 +126,7 @@ func _ready() -> void:
 	pointers = Pointers.new()
 	origin.add_child(pointers)
 	pointers.card_selected.connect(_on_card_selected)
+	pointers.menu_pressed.connect(toggle_settings)
 	pointers.overflow_selected.connect(func(): cycle_session(+1))
 	pointers.focus_moved.connect(_on_focus_dragged)
 	pointers.focus_resized.connect(_on_focus_resized)
@@ -139,6 +140,7 @@ func _ready() -> void:
 	add_child(client)
 	client.screen_frame.connect(_on_frame)
 	client.config_changed.connect(_apply_config)
+	client.settings_changed.connect(_on_settings)
 	client.link_state.connect(func(t):
 		# Only show link state while it is not connected; once it is, the label
 		# belongs to the switcher (session name + how many are waiting).
@@ -461,6 +463,7 @@ func _rebuild_rail() -> void:
 		if float(slot["attention"]) > 0.5:
 			waiting_cards.append((c["mesh"] as MeshInstance3D).material_override)
 	_build_buttons(k)
+	_build_settings(k)
 	if pointers:
 		pointers.set_cards(_card_targets)
 
@@ -475,6 +478,7 @@ func _build_buttons(k: float) -> void:
 			["__new", "+ New", 0.0]]
 	if is_web():
 		specs = [["__reload", "Reload", 0.0], ["__back", "Back", 0.0]]
+	specs.append(["__settings", "Settings", 1.0 if _settings_open else 0.0])
 	for i in range(specs.size()):
 		var b := GlassUI.button(rail_root, font, GlassUI.button_local(frame_outer, size * k, i),
 				size, specs[i][1], specs[i][2])
@@ -484,7 +488,12 @@ func _build_buttons(k: float) -> void:
 
 
 func _on_card_selected(key: String) -> void:
+	if key.begins_with("__st:"):
+		_on_settings_tap(key.substr(5))
+		return
 	match key:
+		"__settings":
+			toggle_settings()
 		"__new":
 			client.new_session()
 		"__back":
@@ -900,6 +909,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			KEY_SPACE:
 				jump_to_glow()
 				return
+			KEY_S:
+				toggle_settings()
+				return
 			KEY_H:
 				if pointers:
 					_flash("hands on" if pointers.toggle_hands() else "hands off")
@@ -1053,7 +1065,219 @@ func _resize_panel(new_dmm: float) -> void:
 		if is_instance_valid(g):
 			g.scale = Vector3.ONE * k
 			g.position = GlassUI.button_local(outer, button_size * k, i)
+	for it in _settings_items:
+		var g: Node3D = it["group"]
+		if is_instance_valid(g):
+			g.scale = Vector3.ONE * k
+			g.position = _settings_local(outer, it["off"], k)
 	_push_pointer_targets()
 	# A bigger window may now reach the floor.
 	_drag_target = focus_group.global_position
 	_drag_pending = true
+
+
+# ── ⚙ settings panel ──────────────────────────────────────────────────────────
+#
+# A column of glass rows to the RIGHT of the window (the rail has the left),
+# riding with it like the rail does. Opened by the Settings button, ctrl+alt+S
+# or the left controller's Menu button. ⚠️ It cannot sit OVER the window: the
+# text is a composition layer and does not depth-sort with the scene, so a
+# panel in front of it would draw behind the text.
+#
+# The rows come from the HOST (atriumd/settings.py) with every config frame —
+# label, config path, allowed values. This file knows no individual setting,
+# except that the scene row hides rooms whose GLB is not in this build. A tap
+# sends {"op":"set_settings"}; the host writes settings.json (never config.lua)
+# and the config frame that comes back is what changes the look, so the panel
+# always shows what is actually applied.
+
+const SET_ROW_W_DEG := 20.0
+const SET_SMALL_W_DEG := 3.2
+const SET_TAB_W_DEG := 7.6
+const SET_GAP_M := 0.012
+
+var _settings_open := false
+var _settings_schema: Array = []
+var _settings_over: Dictionary = {}
+var _settings_tab := 0
+var _settings_items: Array = []   # [{group: Node3D, off: Vector2}] for live resize
+
+
+func toggle_settings() -> void:
+	_settings_open = not _settings_open
+	_rebuild_rail()
+	_flash("settings" if _settings_open else "settings closed")
+
+
+func _on_settings(st: Dictionary) -> void:
+	_settings_schema = st.get("schema", [])
+	_settings_over = st.get("overrides", {})
+	_settings_tab = clampi(_settings_tab, 0, maxi(_settings_schema.size() - 1, 0))
+	if _settings_open:
+		_rebuild_rail()
+
+
+## Where a settings item sits in the rail's space: `off` is its centre in
+## unscaled metres from the frame's top-right corner (x right, y down).
+func _settings_local(outer: Vector2, off: Vector2, k: float) -> Vector3:
+	var frame_top := GlassUI.FRAME_TITLE_M * 0.5 + outer.y * 0.5
+	return Vector3(outer.x * 0.5 + GlassUI.RAIL_GAP_M * k + off.x * k,
+			frame_top - off.y * k, -0.004)
+
+
+func _build_settings(k: float) -> void:
+	_settings_items.clear()
+	if not _settings_open or rail_root == null:
+		return
+	var h := GlassUI.angular_size(1.0, GlassUI.BUTTON_H_DEG, distance).y
+	var y := h * 0.5
+	var x := 0.0
+	if _settings_schema.is_empty():
+		_settings_button("done", "Settings: waiting for the host…", SET_ROW_W_DEG, x, y, 0.0, k)
+		return
+	# Tabs: one per group, the open one lit.
+	for i in range(_settings_schema.size()):
+		var g: Dictionary = _settings_schema[i]
+		x = _settings_button("tab:%d" % i, str(g.get("group", "?")).split(" ")[0],
+				SET_TAB_W_DEG, x, y, 1.0 if i == _settings_tab else 0.0, k)
+	y += h + SET_GAP_M * 2.0
+	for r in _settings_schema[_settings_tab].get("rows", []):
+		var id := str(r.get("id", ""))
+		x = _settings_button("row:" + id, "%s   %s" % [r.get("label", id), _settings_value_text(r)],
+				SET_ROW_W_DEG, 0.0, y, 0.0, k)
+		if str(r.get("kind", "")) == "step":
+			x = _settings_button("dec:" + id, "−", SET_SMALL_W_DEG, x, y, 0.0, k)
+			x = _settings_button("inc:" + id, "+", SET_SMALL_W_DEG, x, y, 0.0, k)
+		if _settings_row_overridden(r):
+			# The panel owns this one: offer the way back to config.lua's value.
+			_settings_button("reset:" + id, "↺", SET_SMALL_W_DEG, x, y, 0.0, k)
+		y += h + SET_GAP_M
+	y += SET_GAP_M
+	x = _settings_button("done", "Done", SET_TAB_W_DEG, 0.0, y, 0.0, k)
+	if not _settings_over.is_empty():
+		_settings_button("resetall", "Reset all", SET_TAB_W_DEG * 1.4, x, y, 0.0, k)
+
+
+## One settings button, left edge at `x` (metres from the panel's left), centre
+## at `y` down from the top. Returns the next free x.
+func _settings_button(key: String, label: String, w_deg: float, x: float, y: float,
+		attention: float, k: float) -> float:
+	var size := GlassUI.angular_size(w_deg, GlassUI.BUTTON_H_DEG, distance)
+	var off := Vector2(x + size.x * 0.5, y)
+	var b := GlassUI.button(rail_root, font, _settings_local(frame_outer, off, k), size,
+			label, attention)
+	var g: Node3D = b["group"]
+	g.scale = Vector3.ONE * k
+	_settings_items.append({"group": g, "off": off})
+	_card_targets.append({"mesh": b["mesh"], "size": size, "key": "__st:" + key})
+	return x + size.x + SET_GAP_M
+
+
+func _cfg_get(path: String):
+	var node = _last_cfg
+	for part in path.split("."):
+		if typeof(node) != TYPE_DICTIONARY or not node.has(part):
+			return null
+		node = node[part]
+	return node
+
+
+func _settings_row(id: String) -> Dictionary:
+	for g in _settings_schema:
+		for r in g.get("rows", []):
+			if str(r.get("id", "")) == id:
+				return r
+	return {}
+
+
+## The options a choice row may cycle through on THIS build.
+func _settings_options(r: Dictionary) -> Array:
+	var out: Array = []
+	for o in r.get("options", []):
+		var p := str(o.get("preset", ""))
+		if p == "" or Backdrop.has_preset(p):
+			out.append(o)
+	return out
+
+
+## Index of the option matching the applied config, or -1.
+func _settings_current(opts: Array) -> int:
+	for i in range(opts.size()):
+		var ok := true
+		var set_: Dictionary = opts[i].get("set", {})
+		for path in set_:
+			if _cfg_get(path) != set_[path]:
+				ok = false
+				break
+		if ok:
+			return i
+	return -1
+
+
+func _settings_value_text(r: Dictionary) -> String:
+	if str(r.get("kind", "")) == "step":
+		var v = _cfg_get(str(r.get("path", "")))
+		if v == null:
+			return "?"
+		var unit := str(r.get("unit", ""))
+		if unit == "%":
+			return "%d%%" % roundi(float(v) * 100.0)
+		return "%s%s" % [str(snappedf(float(v), 0.1)).trim_suffix(".0"), unit]
+	var opts := _settings_options(r)
+	var i := _settings_current(opts)
+	return str(opts[i].get("label", "?")) if i >= 0 else "custom"
+
+
+func _settings_row_overridden(r: Dictionary) -> bool:
+	for p in _settings_paths(r):
+		if _settings_over.has(p):
+			return true
+	return false
+
+
+func _settings_paths(r: Dictionary) -> Array:
+	if str(r.get("kind", "")) == "step":
+		return [str(r.get("path", ""))]
+	var out: Array = []
+	for o in r.get("options", []):
+		for p in o.get("set", {}):
+			if not out.has(p):
+				out.append(p)
+	return out
+
+
+func _on_settings_tap(what: String) -> void:
+	var verb := what.get_slice(":", 0)
+	var arg := what.substr(verb.length() + 1)
+	match verb:
+		"done":
+			toggle_settings()
+		"tab":
+			_settings_tab = int(arg)
+			_rebuild_rail()
+		"resetall":
+			client.reset_settings(null)
+		"reset":
+			client.reset_settings(_settings_paths(_settings_row(arg)))
+		"row":
+			var r := _settings_row(arg)
+			if str(r.get("kind", "")) != "choice":
+				return
+			var opts := _settings_options(r)
+			if opts.is_empty():
+				return
+			var nxt: Dictionary = opts[(_settings_current(opts) + 1) % opts.size()]
+			client.send_settings(nxt.get("set", {}))
+		"dec", "inc":
+			var r := _settings_row(arg)
+			var path := str(r.get("path", ""))
+			var lo := float(r.get("min", 0.0))
+			var st := float(r.get("step", 1.0))
+			var cur = _cfg_get(path)
+			var v := float(cur) if cur != null else lo
+			v = lo + roundf((v - lo) / st) * st + (st if verb == "inc" else -st)
+			v = clampf(v, lo, float(r.get("max", v)))
+			if path == "font.size_dmm":
+				# The thumbstick resize is a local override; the panel's size wins.
+				_dmm_override = 0.0
+			client.send_settings({path: v})

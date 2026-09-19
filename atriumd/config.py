@@ -16,6 +16,7 @@ import re
 import subprocess
 
 import schemes
+import settings as _settings
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -386,8 +387,10 @@ class ConfigWatcher:
         self.user_path = user_path or USER_CONFIG
         self.watch = [os.path.join(CONFIG_DIR, "default.lua"),
                       os.path.join(CONFIG_DIR, "xr.lua"),
-                      self.user_path]
+                      self.user_path,
+                      _settings.path_for(self.user_path)]
         self._stamps = None
+        self.overrides = {}
         self.config = None
         self.warnings = []
         self.error = None
@@ -415,6 +418,7 @@ class ConfigWatcher:
         self._stamps = self._stamp()
         try:
             cfg, warnings = evaluate(self.user_path)
+            self.overrides = _settings.apply(cfg, _settings.load(_settings.path_for(self.user_path)))
         except ConfigError as e:
             self.error = str(e)
             if self.config is None:
@@ -442,4 +446,6 @@ class ConfigWatcher:
             "warnings": self.warnings,
             "error": self.error,
             "config": self.config,
+            # The ⚙ panel: what it can set, and which of those the panel owns.
+            "settings": {"schema": _settings.schema(), "overrides": self.overrides},
         }

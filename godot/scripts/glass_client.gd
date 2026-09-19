@@ -10,6 +10,8 @@ class_name GlassClient
 signal screen_frame(msg)
 signal sessions(list)
 signal config_changed(cfg)
+## The ⚙ panel: {"schema": [...], "overrides": {...}} — sent with every config.
+signal settings_changed(s)
 signal link_state(text)
 signal keys_ack(msg)
 signal scroll_ack(msg)
@@ -101,6 +103,20 @@ func new_session() -> void:
 func close_session(key: String) -> void:
 	if connected:
 		_send({"op": "close_session", "key": key})
+
+
+## ⚙ panel: `values` = {"dotted.path": value}. The host checks every path and
+## value against its own schema and writes settings.json, never config.lua.
+func send_settings(values: Dictionary) -> void:
+	if connected:
+		_send({"op": "set_settings", "values": values})
+
+
+## Drop panel overrides so config.lua shows through. `keys` = [] of paths, or
+## null for all of them.
+func reset_settings(keys) -> void:
+	if connected:
+		_send({"op": "reset_settings", "keys": keys})
 
 
 func resync(key: String) -> void:
@@ -195,6 +211,7 @@ func _process(delta: float) -> void:
 				emit_signal("sessions", [msg.get("session", {})])
 			"config":
 				emit_signal("config_changed", msg.get("config", {}))
+				emit_signal("settings_changed", msg.get("settings", {}))
 			"removed", "session-closed":
 				emit_signal("session_removed", str(msg.get("key", "")))
 			"web-frame":

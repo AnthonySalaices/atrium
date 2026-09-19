@@ -7,6 +7,8 @@ class_name Backdrop
 ##   mode = "default"      -> a shipped preset:
 ##       preset = "cafe"    the Astra-built coffee shop (AS-0002), a GLB with
 ##                          baked lighting and a handful of slow animation loops
+##       preset = "cafe-night" / "cabin" / "library"   more Astra rooms (ROOMS);
+##                          one that is not in this build falls back to the sky
 ##       preset = "nebula"  the procedural sky that shipped first
 ##       preset = "void"    flat dark
 ##   mode = "custom"       -> your own .glb, fetched from the daemon at runtime
@@ -14,12 +16,20 @@ class_name Backdrop
 ##
 ## ⭐ Glass is for the windows only; nothing here is glass.
 ##
-## Every preset is built once and switched with `visible` / background mode, so a
-## config save flips between them live without reloading anything.
+## The sky and the void are switched with background mode. A room is a GLB:
+## only one is held at a time and picking another loads it (a second or so).
 
-const CAFE_SCENE := "res://backdrops/cafe.glb"
+## Every Astra room, by preset name. `clear` is only seen through a gap in the
+## geometry. ⚠️ A new GLB needs the café's two import flags
+## (force_disable_compression, generate_lods=false) — see cafe.glb.import.
+const ROOMS := {
+	"cafe": {"scene": "res://backdrops/cafe.glb", "clear": Color(0.10, 0.08, 0.07)},
+	"cafe-night": {"scene": "res://backdrops/cafe-night.glb", "clear": Color(0.07, 0.08, 0.16)},
+	"cabin": {"scene": "res://backdrops/cabin.glb", "clear": Color(0.20, 0.12, 0.22)},
+	"library": {"scene": "res://backdrops/library.glb", "clear": Color(0.10, 0.09, 0.08)},
+}
 const VOID_COLOR := Color(0.035, 0.030, 0.028)
-const CAFE_CLEAR := Color(0.10, 0.08, 0.07)   # only seen through a gap Astra left
+const CAFE_CLEAR := Color(0.10, 0.08, 0.07)
 
 var env: Environment
 var sky_mat: ShaderMaterial
@@ -147,10 +157,10 @@ func apply(bd: Dictionary) -> void:
 		_show_room(true)
 	else:
 		match preset:
-			"cafe":
-				if _ensure_room("cafe"):
+			_ when ROOMS.has(preset):
+				if _ensure_room(preset):
 					env.background_mode = Environment.BG_COLOR
-					env.background_color = CAFE_CLEAR
+					env.background_color = ROOMS[preset]["clear"]
 					env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 					# The room's colours are already baked; a filmic curve on top
 					# only washes them out. Linear reproduces what Astra rendered.
@@ -202,22 +212,32 @@ func _show_room(on: bool) -> void:
 			p.pause()
 
 
-## Instantiate the café once. Returns false when the GLB is not in the build.
+## True when `p` can be shown by this build: the sky and the void always, a
+## room only if its GLB was packed. The ⚙ panel hides the rest.
+static func has_preset(p: String) -> bool:
+	if p == "nebula" or p == "void":
+		return true
+	return ROOMS.has(p) and ResourceLoader.exists(ROOMS[p]["scene"])
+
+
+## Instantiate room `kind` (a ROOMS key). Returns false when its GLB is not in
+## the build. Already showing it = nothing to do.
 func _ensure_room(kind: String) -> bool:
 	if room != null and _room_kind == kind:
 		return true
-	if kind != "cafe":
+	if not ROOMS.has(kind):
 		return false
-	if not ResourceLoader.exists(CAFE_SCENE):
-		print("[backdrop] %s is not in this build" % CAFE_SCENE)
+	var path: String = ROOMS[kind]["scene"]
+	if not ResourceLoader.exists(path):
+		print("[backdrop] %s is not in this build" % path)
 		return false
-	var packed := load(CAFE_SCENE) as PackedScene
+	var packed := load(path) as PackedScene
 	if packed == null:
-		print("[backdrop] %s failed to load" % CAFE_SCENE)
+		print("[backdrop] %s failed to load" % path)
 		return false
 	var node := packed.instantiate() as Node3D
-	node.name = "Cafe"
-	_install_room(node, "cafe")
+	node.name = kind.capitalize().replace(" ", "")
+	_install_room(node, kind)
 	return true
 
 
