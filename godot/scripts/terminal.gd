@@ -859,12 +859,21 @@ func waiting_count() -> int:
 	return n
 
 
+var _strip_key := ""
+
+
 func _update_status() -> void:
 	if title_left == null or frame_vp == null:
 		return
 	title_left.text = link_text if link_text != "" else session
 	var crop: Vector2i = _cropped.get(session, Vector2i.ZERO)
 	var right := GlassUI.title_right_text(waiting_count(), crop)
+	# Re-render (and re-bake) only when the words change: a baked strip costs a
+	# GPU readback, and session deltas arrive several times a second.
+	var key := title_left.text + "|" + right + "|" + str(frame_vp.size)
+	if key == _strip_key:
+		return
+	_strip_key = key
 	title_right.text = right
 	# ⚠️ Measure the string; a guessed fraction of the width runs off the frame.
 	var title_px := GlassUI.TITLE_PX
@@ -874,6 +883,8 @@ func _update_status() -> void:
 	title_right.position.x = float(frame_vp.size.x) - w - pad_px - 6.0
 	# The strip only re-renders when its text changes.
 	frame_vp.render_target_update_mode = SubViewport.UPDATE_ONCE
+	if frame_mesh:
+		GlassUI.bake_content(frame_vp, frame_mesh.material_override, false)
 
 
 ## A short note on the title strip's right end, then back to the usual status.
@@ -883,7 +894,10 @@ func _flash(text: String) -> void:
 	title_right.text = text
 	var w := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, GlassUI.TITLE_PX).x
 	title_right.position.x = float(frame_vp.size.x) - w - 60.0
+	_strip_key = ""                      # the next status update must redraw
 	frame_vp.render_target_update_mode = SubViewport.UPDATE_ONCE
+	if frame_mesh:
+		GlassUI.bake_content(frame_vp, frame_mesh.material_override, false)
 	get_tree().create_timer(2.0).timeout.connect(_update_status)
 
 
@@ -986,6 +1000,12 @@ func _unhandled_key_input(event: InputEvent) -> void:
 				if pointers:
 					_flash("hands on" if pointers.toggle_hands() else "hands off")
 				return
+	# ⚙ Settings is a mode: Esc closes it, and nothing typed reaches the
+	# hidden pane meanwhile.
+	if _settings_open:
+		if not k.echo and k.keycode == KEY_ESCAPE:
+			toggle_settings()
+		return
 	# ⛔ While the pairing card is up, every key belongs to it. Nothing typed
 	# there may reach a tmux pane.
 	if pairing != null:
@@ -1135,49 +1155,58 @@ func _resize_panel(new_dmm: float) -> void:
 		if is_instance_valid(g):
 			g.scale = Vector3.ONE * k
 			g.position = GlassUI.button_local(outer, button_size * k, i)
-	for it in _settings_items:
-		var g: Node3D = it["group"]
-		if is_instance_valid(g):
-			g.scale = Vector3.ONE * k
-			g.position = _settings_local(outer, it["off"], k)
 	_push_pointer_targets()
 	# A bigger window may now reach the floor.
 	_drag_target = focus_group.global_position
 	_drag_pending = true
 
 
-# ── ⚙ settings panel ──────────────────────────────────────────────────────────
+# ── ⚙ settings ────────────────────────────────────────────────────────────────
 #
-# A column of glass rows to the RIGHT of the window (the rail has the left),
-# riding with it like the rail does. Opened by the Settings button, ctrl+alt+S
-# or the left controller's Menu button. ⚠️ It cannot sit OVER the window: the
-# text is a composition layer and does not depth-sort with the scene, so a
-# panel in front of it would draw behind the text.
+# ⭐ A MODE, not a side panel (owner 9/18: "settings should be the center of
+# attention"): opening it hides the terminal — frame, text layer and rail —
+# and the settings take the window's place, same spot, same distance. Opened by
+# the Settings button, ctrl+alt+S or the left Menu button; Done / Esc closes.
+# While open, typing never reaches the hidden pane.
+#
+# Tabs down the left, the open tab's rows on the right. The Scene tab is a grid
+# of previews: a tap only PICKS a scene, "Use …" applies it — switching rooms
+# is intentional, never a stray trigger pull.
 #
 # The rows come from the HOST (atriumd/settings.py) with every config frame —
-# label, config path, allowed values. This file knows no individual setting,
-# except that the scene row hides rooms whose GLB is not in this build. A tap
-# sends {"op":"set_settings"}; the host writes settings.json (never config.lua)
-# and the config frame that comes back is what changes the look, so the panel
-# always shows what is actually applied.
+# label, config path, allowed values. A change sends {"op":"set_settings"}; the
+# host writes settings.json (never config.lua) and the config frame that comes
+# back is what changes anything, so the panel always shows what is applied.
 
-const SET_ROW_W_DEG := 20.0
-const SET_SMALL_W_DEG := 3.2
-const SET_TAB_W_DEG := 6.9
-const SET_TABS_PER_ROW := 4
-const SET_GAP_M := 0.012
+const SET_TOTAL_W_DEG := 58.0
+const SET_TOP_DEG := 20.0          # the panel's top edge, above the window centre
+const SET_TAB_W_DEG := 10.0
+const SET_ROW_W_DEG := 32.0
+const SET_SMALL_W_DEG := 3.4
+const SET_GAP_DEG := 0.6
+const SET_THUMB_COLS := 4
+const SET_THUMB_W_DEG := 11.2
 
 var _settings_open := false
 var _settings_schema: Array = []
 var _settings_over: Dictionary = {}
 var _settings_tab := 0
-var _settings_items: Array = []   # [{group: Node3D, off: Vector2}] for live resize
+var _scene_pick := ""               # the previewed scene key, "" = none picked yet
+var settings_root: Node3D
 
 
 func toggle_settings() -> void:
 	_settings_open = not _settings_open
+	_scene_pick = ""
+	# The terminal steps aside: hide the whole window group (frame, rail,
+	# buttons) and switch the composition layer off — a layer draws over
+	# everything, so hiding its parent is not enough on every runtime.
+	if focus_group:
+		focus_group.visible = not _settings_open
+	if layer and "enabled" in layer:
+		layer.enabled = not _settings_open
 	_rebuild_rail()
-	_flash("settings" if _settings_open else "settings closed")
+	_flash("settings" if _settings_open else "")
 
 
 func _on_settings(st: Dictionary) -> void:
@@ -1188,63 +1217,109 @@ func _on_settings(st: Dictionary) -> void:
 		_rebuild_rail()
 
 
-## Where a settings item sits in the rail's space: `off` is its centre in
-## unscaled metres from the frame's top-right corner (x right, y down).
-func _settings_local(outer: Vector2, off: Vector2, k: float) -> Vector3:
-	var frame_top := GlassUI.FRAME_TITLE_M * 0.5 + outer.y * 0.5
-	return Vector3(outer.x * 0.5 + GlassUI.RAIL_GAP_M * k + off.x * k,
-			frame_top - off.y * k, -0.004)
+func _m_per_deg() -> float:
+	return distance * tan(deg_to_rad(1.0))
 
 
-func _build_settings(k: float) -> void:
-	_settings_items.clear()
-	if not _settings_open or rail_root == null:
+## Build the settings in their own group where the window stands. (`k` is the
+## rail's scale and unused: settings are always full size.)
+func _build_settings(_k: float) -> void:
+	if settings_root != null:
+		settings_root.queue_free()
+		settings_root = null
+	if not _settings_open or focus_group == null or rig == null:
 		return
-	var h := GlassUI.angular_size(1.0, GlassUI.BUTTON_H_DEG, distance).y
-	var y := h * 0.5
-	var x := 0.0
+	settings_root = Node3D.new()
+	rig.add_child(settings_root)
+	settings_root.transform = focus_group.transform
+	var bh := GlassUI.BUTTON_H_DEG
 	if _settings_schema.is_empty():
-		_settings_button("done", "Settings: waiting for the host…", SET_ROW_W_DEG, x, y, 0.0, k)
+		_st_button("done", "Settings: waiting for the host…", 0.0, 0.0, 30.0, 0.0)
 		return
-	# Tabs: one per group, the open one lit, SET_TABS_PER_ROW to a row.
+	# Sidebar: one tab per group, Done and Reset all underneath.
+	var y := 0.0
 	for i in range(_settings_schema.size()):
-		if i > 0 and i % SET_TABS_PER_ROW == 0:
-			x = 0.0
-			y += h + SET_GAP_M
-		var g: Dictionary = _settings_schema[i]
-		x = _settings_button("tab:%d" % i, str(g.get("group", "?")).split(" ")[0],
-				SET_TAB_W_DEG, x, y, 1.0 if i == _settings_tab else 0.0, k)
-	y += h + SET_GAP_M * 2.0
-	for r in _settings_schema[_settings_tab].get("rows", []):
+		_st_button("tab:%d" % i, str(_settings_schema[i].get("group", "?")),
+				0.0, y, SET_TAB_W_DEG, 1.0 if i == _settings_tab else 0.0)
+		y += bh + SET_GAP_DEG
+	y += bh * 0.5
+	_st_button("done", "Done", 0.0, y, SET_TAB_W_DEG, 0.0)
+	if not _settings_over.is_empty():
+		y += bh + SET_GAP_DEG
+		_st_button("resetall", "Reset all", 0.0, y, SET_TAB_W_DEG, 0.0)
+	# Content.
+	var x0 := SET_TAB_W_DEG + 1.5
+	var g: Dictionary = _settings_schema[_settings_tab]
+	y = 0.0
+	for r in g.get("rows", []):
+		if str(r.get("id", "")) == "scene":
+			y = _build_scene_picker(r, x0, y)
+			continue
 		var id := str(r.get("id", ""))
-		x = _settings_button("row:" + id, "%s   %s" % [r.get("label", id), _settings_value_text(r)],
-				SET_ROW_W_DEG, 0.0, y, 0.0, k)
+		var x := _st_button("row:" + id, "%s   %s" % [r.get("label", id), _settings_value_text(r)],
+				x0, y, SET_ROW_W_DEG, 0.0)
 		if str(r.get("kind", "")) == "step":
-			x = _settings_button("dec:" + id, "−", SET_SMALL_W_DEG, x, y, 0.0, k)
-			x = _settings_button("inc:" + id, "+", SET_SMALL_W_DEG, x, y, 0.0, k)
+			x = _st_button("dec:" + id, "−", x, y, SET_SMALL_W_DEG, 0.0)
+			x = _st_button("inc:" + id, "+", x, y, SET_SMALL_W_DEG, 0.0)
 		if _settings_row_overridden(r):
 			# The panel owns this one: offer the way back to config.lua's value.
-			_settings_button("reset:" + id, "↺", SET_SMALL_W_DEG, x, y, 0.0, k)
-		y += h + SET_GAP_M
-	y += SET_GAP_M
-	x = _settings_button("done", "Done", SET_TAB_W_DEG, 0.0, y, 0.0, k)
-	if not _settings_over.is_empty():
-		_settings_button("resetall", "Reset all", SET_TAB_W_DEG * 1.4, x, y, 0.0, k)
+			_st_button("reset:" + id, "↺", x, y, SET_SMALL_W_DEG, 0.0)
+		y += bh + SET_GAP_DEG
 
 
-## One settings button, left edge at `x` (metres from the panel's left), centre
-## at `y` down from the top. Returns the next free x.
-func _settings_button(key: String, label: String, w_deg: float, x: float, y: float,
-		attention: float, k: float) -> float:
-	var size := GlassUI.angular_size(w_deg, GlassUI.BUTTON_H_DEG, distance)
-	var off := Vector2(x + size.x * 0.5, y)
-	var b := GlassUI.button(rail_root, font, _settings_local(frame_outer, off, k), size,
+## Scene previews in a grid; a tap picks, "Use …" applies. Returns the next y.
+func _build_scene_picker(r: Dictionary, x0: float, y: float) -> float:
+	var opts := _settings_options(r)
+	var cur := _settings_current(opts)
+	var th := SET_THUMB_W_DEG * 9.0 / 16.0
+	var picked := -1
+	for i in range(opts.size()):
+		var key := _scene_key(opts[i])
+		if key == _scene_pick:
+			picked = i
+		var cx := x0 + float(i % SET_THUMB_COLS) * (SET_THUMB_W_DEG + SET_GAP_DEG)
+		var cy := y + float(i / SET_THUMB_COLS) * (th + SET_GAP_DEG)
+		var tex: Texture2D = null
+		var path := "res://thumbs/%s.jpg" % key
+		if ResourceLoader.exists(path):
+			tex = load(path)
+		var label := str(opts[i].get("label", key)) + ("  •" if i == cur else "")
+		var t := GlassUI.thumb(settings_root, font, _st_pos(cx, cy, SET_THUMB_W_DEG, th),
+				GlassUI.angular_size(SET_THUMB_W_DEG, th, distance), tex, label,
+				1.0 if key == _scene_pick else 0.0)
+		_card_targets.append({"mesh": t["mesh"], "key": "__st:scene:" + key,
+				"size": GlassUI.angular_size(SET_THUMB_W_DEG, th, distance)})
+	var rows_n := int(ceil(float(opts.size()) / float(SET_THUMB_COLS)))
+	y += float(rows_n) * (th + SET_GAP_DEG) + SET_GAP_DEG
+	var bw := SET_ROW_W_DEG
+	if picked >= 0 and picked != cur:
+		_st_button("use", "Use  " + str(opts[picked].get("label", "")), x0, y, bw, 1.0)
+	elif cur >= 0:
+		_st_button("noop", "Now: " + str(opts[cur].get("label", "")) + "   (tap a scene to preview)",
+				x0, y, bw, 0.0)
+	return y + GlassUI.BUTTON_H_DEG + SET_GAP_DEG * 2.0
+
+
+func _scene_key(o: Dictionary) -> String:
+	var p := str(o.get("preset", ""))
+	return p if p != "" else "passthrough"
+
+
+## The centre of an item whose top-left is (x, y) degrees from the panel's
+## top-left, in settings_root space.
+func _st_pos(x: float, y: float, w: float, h: float) -> Vector3:
+	var m := _m_per_deg()
+	return Vector3((x + w * 0.5 - SET_TOTAL_W_DEG * 0.5) * m, (SET_TOP_DEG - y - h * 0.5) * m, 0.0)
+
+
+## One settings button at (x, y) degrees, w wide. Returns the next free x.
+func _st_button(key: String, label: String, x: float, y: float, w: float,
+		attention: float) -> float:
+	var size := GlassUI.angular_size(w, GlassUI.BUTTON_H_DEG, distance)
+	var b := GlassUI.button(settings_root, font, _st_pos(x, y, w, GlassUI.BUTTON_H_DEG), size,
 			label, attention)
-	var g: Node3D = b["group"]
-	g.scale = Vector3.ONE * k
-	_settings_items.append({"group": g, "off": off})
 	_card_targets.append({"mesh": b["mesh"], "size": size, "key": "__st:" + key})
-	return x + size.x + SET_GAP_M
+	return x + w + SET_GAP_DEG
 
 
 func _cfg_get(path: String):
@@ -1329,6 +1404,17 @@ func _on_settings_tap(what: String) -> void:
 	match verb:
 		"done":
 			toggle_settings()
+		"noop":
+			pass
+		"scene":
+			_scene_pick = arg
+			_rebuild_rail()
+		"use":
+			for o in _settings_options(_settings_row("scene")):
+				if _scene_key(o) == _scene_pick:
+					client.send_settings(o.get("set", {}))
+					_flash("scene: " + str(o.get("label", "")))
+			_scene_pick = ""
 		"tab":
 			_settings_tab = int(arg)
 			_rebuild_rail()

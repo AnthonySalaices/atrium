@@ -463,7 +463,7 @@ func _is_hand(c: XRController3D) -> bool:
 ## {kind, mesh, key?, point, dist, local: Vector2, cell?: Vector2i}.
 func _nearest_hit(origin: Vector3, dir: Vector3) -> Dictionary:
 	var best := {}
-	if _frame != null and is_instance_valid(_frame):
+	if _frame != null and is_instance_valid(_frame) and _frame.is_visible_in_tree():
 		var r := hit_quad(_frame.global_transform, _frame_size, origin, dir)
 		if not r.is_empty():
 			var local: Vector2 = r["local"]
@@ -476,7 +476,7 @@ func _nearest_hit(origin: Vector3, dir: Vector3) -> Dictionary:
 			best = r
 	for card in _cards:
 		var m: MeshInstance3D = card["mesh"]
-		if m == null or not is_instance_valid(m):
+		if m == null or not is_instance_valid(m) or not m.is_visible_in_tree():
 			continue
 		var r := hit_quad(m.global_transform, card["size"], origin, dir)
 		if r.is_empty():
